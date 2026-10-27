@@ -139,12 +139,12 @@ function ear(p){const e=i=>(dd(p[i+1],p[i+5])+dd(p[i+2],p[i+4]))/(2*dd(p[i],p[i+
 function faceView(){ensure(()=>{const f=DATA.faces||[],b=$('br').value;$('v').innerHTML=`<div class="hint">কর্মীকে ক্যামেরার সামনে বসিয়ে সামনে তাকাতে বলুন, চোখ খোলা রেখে। ছবি সংরক্ষণ হয় না, শুধু মুখের সংখ্যাভিত্তিক বৈশিষ্ট্য থাকে। ✅ = নিবন্ধিত। নিবন্ধন করা কর্মীকে হাজিরার সময় চোখ পিটপিট করে মুখ মেলাতে হবে।</div><div class="card fm"><div><label>কর্মী</label><select id="st">${D.staff.filter(s=>!b||s.branch===b).map(s=>`<option value="${esc(s.code)}">${f.includes(s.code)?'✅ ':''}${esc(s.name)} (${esc(s.code)})</option>`).join('')}</select></div><button onclick="enrol()">📷 নিবন্ধন শুরু</button><button class="x" onclick="delFace()">নিবন্ধন মুছুন</button></div><div class="card" style="text-align:center"><video id="cam" autoplay playsinline muted style="width:320px;max-width:100%;transform:scaleX(-1);background:#111;border-radius:10px"></video><div id="cmsg" style="margin-top:8px;font-weight:700"></div></div>`})}
 async function enrol(){const code=$('st').value,m=$('cmsg');if(!code)return;let st;
  try{m.textContent='ক্যামেরা ও মডেল লোড হচ্ছে...';await faceLib();st=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:480},audio:false});const v=$('cam');v.srcObject=st;await v.play();
-  const o=new faceapi.TinyFaceDetectorOptions({inputSize:224,scoreThreshold:.6}),S=[],t0=Date.now();let last=0;m.textContent='সামনে তাকান...';
-  while(S.length<5&&Date.now()-t0<30000){const r=await faceapi.detectSingleFace(v,o).withFaceLandmarks().withFaceDescriptor();
-   if(r&&ear(r.landmarks.positions)>.2&&Date.now()-last>600){S.push(Array.from(r.descriptor));last=Date.now();m.textContent='নেওয়া হয়েছে '+bn(S.length)+'/৫'}await new Promise(k=>setTimeout(k,60))}
-  st.getTracks().forEach(x=>x.stop());v.srcObject=null;if(S.length<5)throw new Error('মুখ স্পষ্ট পাওয়া যায়নি, আবার চেষ্টা করুন');
-  const avg=S[0].map((_,i)=>S.reduce((q,x)=>q+x[i],0)/S.length);
-  call('adminSaveFace',[code,JSON.stringify(avg)],()=>{DATA=null;toast('মুখ নিবন্ধিত হয়েছে');faceView()})}catch(e){if(st)st.getTracks().forEach(x=>x.stop());m.textContent=e.message}}
+  const o=new faceapi.TinyFaceDetectorOptions({inputSize:224,scoreThreshold:.6}),S=[],t0=Date.now();let last=0;m.textContent='সামনে তাকান, তারপর ধীরে মাথা একটু ডানে-বামে-ওপরে-নিচে ঘোরান';
+  while(S.length<8&&Date.now()-t0<30000){const r=await faceapi.detectSingleFace(v,o).withFaceLandmarks().withFaceDescriptor();
+   if(r&&ear(r.landmarks.positions)>.2&&Date.now()-last>600){S.push(Array.from(r.descriptor));last=Date.now();m.textContent='নেওয়া হয়েছে '+bn(S.length)+'/৮'}await new Promise(k=>setTimeout(k,60))}
+  st.getTracks().forEach(x=>x.stop());v.srcObject=null;if(S.length<8)throw new Error('মুখ স্পষ্ট পাওয়া যায়নি, আবার চেষ্টা করুন');
+  
+  call('adminSaveFace',[code,JSON.stringify(S)],()=>{DATA=null;toast('মুখ নিবন্ধিত হয়েছে');faceView()})}catch(e){if(st)st.getTracks().forEach(x=>x.stop());m.textContent=e.message}}
 function delFace(){if(confirm('এই কর্মীর মুখ-নিবন্ধন মুছবেন?'))call('adminDelFace',[$('st').value],()=>{DATA=null;toast('মুছে ফেলা হয়েছে');faceView()})}
 $('lgi').src=$('lgl').src=LOGO;$('lgw').src=WORD;function fitPrint(){document.body.classList.add('pm');const v=$('v');v.style.zoom='';v.style.width='';const h=v.scrollHeight,max=1040,z=Math.min(1,max/h);if(z<1){v.style.zoom=z;v.style.width=(194/z)+'mm'}}
 function unfitPrint(){document.body.classList.remove('pm');const v=$('v');v.style.zoom='';v.style.width=''}
