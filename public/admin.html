@@ -141,7 +141,7 @@ async function enrol(){const code=$('st').value,m=$('cmsg');if(!code)return;let 
  try{m.textContent='ক্যামেরা ও মডেল লোড হচ্ছে...';await faceLib();st=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:480},audio:false});const v=$('cam');v.srcObject=st;await v.play();
   const o=new faceapi.TinyFaceDetectorOptions({inputSize:224,scoreThreshold:.6}),S=[],t0=Date.now();let last=0;m.textContent='সামনে তাকান...';
   while(S.length<5&&Date.now()-t0<30000){const r=await faceapi.detectSingleFace(v,o).withFaceLandmarks().withFaceDescriptor();
-   if(r&&ear(r.landmarks.positions)>.26&&Date.now()-last>600){S.push(Array.from(r.descriptor));last=Date.now();m.textContent='নেওয়া হয়েছে '+bn(S.length)+'/৫'}await new Promise(k=>setTimeout(k,60))}
+   if(r&&ear(r.landmarks.positions)>.2&&Date.now()-last>600){S.push(Array.from(r.descriptor));last=Date.now();m.textContent='নেওয়া হয়েছে '+bn(S.length)+'/৫'}await new Promise(k=>setTimeout(k,60))}
   st.getTracks().forEach(x=>x.stop());v.srcObject=null;if(S.length<5)throw new Error('মুখ স্পষ্ট পাওয়া যায়নি, আবার চেষ্টা করুন');
   const avg=S[0].map((_,i)=>S.reduce((q,x)=>q+x[i],0)/S.length);
   call('adminSaveFace',[code,JSON.stringify(avg)],()=>{DATA=null;toast('মুখ নিবন্ধিত হয়েছে');faceView()})}catch(e){if(st)st.getTracks().forEach(x=>x.stop());m.textContent=e.message}}
