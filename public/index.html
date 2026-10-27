@@ -21,11 +21,15 @@ async function faceLib(){if(!window.faceapi)await new Promise((ok,no)=>{const s=
 const dd=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
 function ear(p){const e=i=>(dd(p[i+1],p[i+5])+dd(p[i+2],p[i+4]))/(2*dd(p[i],p[i+3]));return(e(36)+e(42))/2}
 let FACE=false;
+function bk(s,e){s.n=(s.n||0)+1;if(!s.closed){if(e<.5)s.base=Math.max(s.base||0,e);if(s.n>=4&&s.base&&e<s.base*.78)s.closed=true}else if(e>s.base*.88)s.done=true;return s}
 async function faceCheck(){await faceLib();const st=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:480},audio:false}),v=$('cam');v.srcObject=st;$('camw').style.display='block';await v.play();
- const o=new faceapi.TinyFaceDetectorOptions({inputSize:224,scoreThreshold:.5});let open=false,blink=false,t0=Date.now();$('cmsg').textContent='মুখ ক্যামেরার সামনে রাখুন, তারপর চোখ পিটপিট করুন 👁️';
- try{while(Date.now()-t0<25000){const r=await faceapi.detectSingleFace(v,o).withFaceLandmarks().withFaceDescriptor();
-  if(r){const e=ear(r.landmarks.positions);if(e>.26){if(blink)return{desc:Array.from(r.descriptor),blink:true};open=true}else if(open&&e<.21)blink=true}
-  await new Promise(k=>setTimeout(k,50))}throw new Error('সময় শেষ — মুখ দেখা যায়নি বা চোখ পিটপিট হয়নি। আবার চেষ্টা করুন')}
+ const fast=new faceapi.TinyFaceDetectorOptions({inputSize:160,scoreThreshold:.4}),full=new faceapi.TinyFaceDetectorOptions({inputSize:224,scoreThreshold:.5}),S={},D3=[],m=$('cmsg'),t0=Date.now();m.textContent='মুখ ক্যামেরার সামনে রাখুন...';
+ try{while(Date.now()-t0<30000){
+  if(S.done){const r=await faceapi.detectSingleFace(v,full).withFaceLandmarks().withFaceDescriptor();if(r&&ear(r.landmarks.positions)>S.base*.85){D3.push(Array.from(r.descriptor));if(D3.length>=3)return{desc:D3,blink:true}}continue}
+  const r=await faceapi.detectSingleFace(v,fast).withFaceLandmarks();
+  if(r){const e=ear(r.landmarks.positions);bk(S,e);m.textContent=(S.closed?'এবার চোখ খুলুন 👀':'মুখ পাওয়া গেছে — চোখ বন্ধ করে খুলুন (একটু ধীরে) 👁️')+'  ['+e.toFixed(2)+'/'+(S.base||0).toFixed(2)+']'}
+  else m.textContent='মুখ দেখা যাচ্ছে না — ক্যামেরার সামনে আসুন'}
+  throw new Error('সময় শেষ — চোখ বন্ধ হওয়া ধরা পড়েনি। আলো ঠিক রেখে, চোখ একটু ধীরে বন্ধ করে খুলুন')}
  finally{st.getTracks().forEach(x=>x.stop());$('camw').style.display='none'}}
 async function go(t){const pin=$('pin').value.trim();if(!pin)return say('PIN দিন');try{localStorage.setItem('pin',pin)}catch(e){}
  if(!navigator.geolocation)return say('এই ব্রাউজারে লোকেশন সুবিধা নেই');busy(true);let fv={desc:null,blink:false};
