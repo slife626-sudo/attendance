@@ -1,5 +1,7 @@
 import {neon} from '@neondatabase/serverless';
-const sql=neon(process.env.DATABASE_URL),q=(t,p=[])=>sql.query(t,p);
+const URLV=String(process.env.DATABASE_URL||'').trim().replace(/^psql\s+/,'').replace(/^DATABASE_URL\s*=\s*/,'').replace(/^['"]|['"]$/g,'').trim();let sql;
+const q=(t,p=[])=>{if(!sql){if(!URLV)throw new Error('DATABASE_URL সেট করা নেই — Vercel > Settings > Environment Variables এ দিয়ে Redeploy করুন');
+ try{sql=neon(URLV)}catch(e){throw new Error('DATABASE_URL ফরম্যাট ভুল — এটা postgresql:// দিয়ে শুরু হতে হবে (কোটেশন বা psql ছাড়া)')}}return sql.query(t,p)};
 const T={Settings:{t:'settings',c:['k','v']},Branches:{t:'branches',c:['branch','lat','lng','radius']},Shifts:{t:'shifts',c:['shift','start_t','end_t']},
  Staff:{t:'staff',c:['code','name','designation','branch','shift','pin','status','weekly_off']},Holidays:{t:'holidays',c:['d','name']},Leaves:{t:'leaves',c:['code','d_from','d_to','typ','note']}};
 const HEAD={Settings:['Key','Value'],Branches:['Branch','Lat','Lng','Radius'],Shifts:['Shift','Start','End'],Staff:['Code','Name','Designation','Branch','Shift','PIN','Status','WeeklyOff'],Holidays:['Date','Name'],Leaves:['Code','From','To','Type','Note']};
@@ -14,24 +16,33 @@ async function sheet(n){const m=T[n];if(!m)throw new Error('অনুমোদ�
 const F={
 async staffInfo(code){const s=await findStaff(code);if(!s)return{ok:false,message:'স্টাফ পাওয়া যায়নি'};if(!active(s))return{ok:false,message:'এই স্টাফ সক্রিয় নয়'};
  const c=await cfg(),a=(await q('select in_t,out_t from attendance where d=$1 and code=$2',[now(c.Timezone).date,s.code]))[0]||{},w=await shiftOf(s);
- return{ok:true,name:s.name,designation:s.designation,branch:s.branch,shift:w.start+' - '+w.end,in:a.in_t||'',out:a.out_t||''}},
-async punch(code,pin,type,lat,lng,acc){const s=await findStaff(code),c=await cfg();
+ return{ok:true,face:!!s.face,name:s.name,designation:s.designation,branch:s.branch,shift:w.start+' - '+w.end,in:a.in_t||'',out:a.out_t||''}},
+async punch(code,pin,type,lat,lng,acc,desc,blink){const s=await findStaff(code),c=await cfg();
  if(!s||S(s.pin).trim()!==S(pin).trim())return{ok:false,message:'PIN সঠিক নয়'};if(!active(s))return{ok:false,message:'স্টাফ সক্রিয় নয়'};
+ let src='Mobile';
+ if(s.face){let ref=null;try{ref=JSON.parse(s.face)}catch(e){}
+  if(!Array.isArray(desc)||desc.length!==128||!desc.every(Number.isFinite)||blink!==true)return{ok:false,message:'মুখ যাচাই সম্পন্ন হয়নি — ক্যামেরায় চোখ পিটপিট করুন'};
+  if(!Array.isArray(ref)||ref.length!==128)return{ok:false,message:'মুখের নিবন্ধন নষ্ট — অ্যাডমিনকে বলুন আবার নিবন্ধন করতে'};
+  const fd=Math.sqrt(ref.reduce((a,x,i)=>a+(x-desc[i])**2,0));if(fd>(Number(c.FaceThreshold)||0.5))return{ok:false,message:'মুখ মিলছে না ('+fd.toFixed(2)+')। নিজের মুখ দিয়ে চেষ্টা করুন'};src='Mobile+Face'}
+ else if(c.FaceRequired==='1')return{ok:false,message:'আপনার মুখ নিবন্ধন করা নেই — অ্যাডমিনের সাথে যোগাযোগ করুন'};
  lat=Number(lat);lng=Number(lng);acc=Number(acc)||0;if(!lat||!lng)return{ok:false,message:'লোকেশন পাওয়া যায়নি'};
  if(acc>(Number(c.MaxAccuracy)||100))return{ok:false,message:'GPS নির্ভুল নয় ('+Math.round(acc)+' মি)। মোবাইল থেকে হাজিরা দিন; কম্পিউটারে GPS থাকে না'};
  const b=(await q('select * from branches where branch=$1',[s.branch]))[0];if(!b||!Number(b.lat)||!Number(b.lng))return{ok:false,message:'এই শাখার লোকেশন সেট করা নেই'};
  const d=Math.round(dist(lat,lng,Number(b.lat),Number(b.lng)));if(d>(Number(b.radius)||150))return{ok:false,message:'আপনি শাখা থেকে '+d+' মিটার দূরে আছেন'};
  const n=now(c.Timezone),a=(await q('select * from attendance where d=$1 and code=$2',[n.date,s.code]))[0];
  if(type==='IN'){if(a&&a.in_t)return{ok:false,message:'আজ আপনি '+a.in_t+'-এ IN দিয়েছেন'};
-  await q(`insert into attendance(d,code,name,branch,in_t,in_dist,source,upd) values($1,$2,$3,$4,$5,$6,'Mobile',$7) on conflict(d,code) do update set in_t=$5,in_dist=$6,upd=$7`,[n.date,s.code,s.name,s.branch,n.time,String(d),n.ts]);}
+  await q(`insert into attendance(d,code,name,branch,in_t,in_dist,source,upd) values($1,$2,$3,$4,$5,$6,$8,$7) on conflict(d,code) do update set in_t=$5,in_dist=$6,upd=$7`,[n.date,s.code,s.name,s.branch,n.time,String(d),n.ts,src]);}
  else{if(!a||!a.in_t)return{ok:false,message:'আগে IN দিন'};await q('update attendance set out_t=$3,out_dist=$4,upd=$5 where d=$1 and code=$2',[n.date,s.code,n.time,String(d),n.ts]);}
  return{ok:true,message:type+' সফল হয়েছে: '+n.time}},
-async adminData(p,month){auth(p);const c=await cfg(),o={month,today:now(c.Timezone).date,tabs:{},att:[]};
+async adminData(p,month){auth(p);const c=await cfg(),o={month,today:now(c.Timezone).date,tabs:{},att:[],faces:(await q("select code from staff where face is not null and face<>''")).map(x=>x.code)};
  for(const n of Object.keys(T))o.tabs[n]=await sheet(n);
  (await q('select d,code,in_t,out_t,note from attendance where d like $1',[month+'%'])).forEach(r=>o.att.push({d:r.d,c:r.code,in:r.in_t||'',out:r.out_t||'',note:r.note||''}));return o},
 async adminSetRow(p,n,row,arr){auth(p);const m=T[n];if(!m)throw new Error('অনুমোদিত নয়');const v=m.c.map((_,i)=>S(arr[i]).trim());
  if(row>0)await q(`update ${m.t} set ${m.c.map((c,i)=>c+'=$'+(i+1)).join(',')} where id=$${m.c.length+1}`,[...v,row]);
  else await q(`insert into ${m.t}(${m.c.join(',')}) values(${m.c.map((_,i)=>'$'+(i+1)).join(',')})`,v);return{ok:true}},
+async adminSaveFace(p,code,json){auth(p);const s=await findStaff(code);if(!s)throw new Error('স্টাফ পাওয়া যায়নি');let a;try{a=JSON.parse(json)}catch(e){}
+ if(!Array.isArray(a)||a.length!==128||!a.every(Number.isFinite))throw new Error('মুখের তথ্য সঠিক নয়');await q('update staff set face=$1 where id=$2',[JSON.stringify(a),s.id]);return{ok:true}},
+async adminDelFace(p,code){auth(p);const s=await findStaff(code);if(!s)throw new Error('স্টাফ পাওয়া যায়নি');await q("update staff set face='' where id=$1",[s.id]);return{ok:true}},
 async adminDelRow(p,n,row){auth(p);if(!T[n]||n==='Settings')throw new Error('অনুমোদিত নয়');await q(`delete from ${T[n].t} where id=$1`,[row]);return{ok:true}},
 async adminSavePunch(p,code,date,tin,tout,note){auth(p);const s=await findStaff(code);if(!s)throw new Error('স্টাফ পাওয়া যায়নি');if(!/^\d{4}-\d{2}-\d{2}$/.test(date))throw new Error('তারিখ দিন');
  await q(`insert into attendance(d,code,name,branch,in_t,out_t,source,note,upd) values($1,$2,$3,$4,$5,$6,'Manual',$7,$8) on conflict(d,code) do update set in_t=$5,out_t=$6,source='Manual',note=$7,upd=$8`,[date,s.code,s.name,s.branch,tin||'',tout||'',note||'',new Date().toISOString()]);return{ok:true}}};
