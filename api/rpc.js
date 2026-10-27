@@ -47,6 +47,7 @@ async adminSaveFace(p,code,json){auth(p);const s=await findStaff(code);if(!s)thr
  a=Array.isArray(a)?toArr(a):[];if(!a.length||a.length>12||!a.every(ok128))throw new Error('মুখের তথ্য সঠিক নয়');await q('update staff set face=$1 where id=$2',[JSON.stringify(a),s.id]);return{ok:true}},
 async adminDelFace(p,code){auth(p);const s=await findStaff(code);if(!s)throw new Error('স্টাফ পাওয়া যায়নি');await q("update staff set face='' where id=$1",[s.id]);return{ok:true}},
 async adminDelRow(p,n,row){auth(p);if(!T[n]||n==='Settings')throw new Error('অনুমোদিত নয়');await q(`delete from ${T[n].t} where id=$1`,[row]);return{ok:true}},
+async adminDelPunch(p,code,date){auth(p);if(!/^\d{4}-\d{2}-\d{2}$/.test(date))throw new Error('তারিখ দিন');const s=await findStaff(code);if(!s)throw new Error('স্টাফ পাওয়া যায়নি');await q('delete from attendance where d=$1 and code=$2',[date,s.code]);return{ok:true}},
 async adminSavePunch(p,code,date,tin,tout,note){auth(p);const s=await findStaff(code);if(!s)throw new Error('স্টাফ পাওয়া যায়নি');if(!/^\d{4}-\d{2}-\d{2}$/.test(date))throw new Error('তারিখ দিন');
  await q(`insert into attendance(d,code,name,branch,in_t,out_t,source,note,upd) values($1,$2,$3,$4,$5,$6,'Manual',$7,$8) on conflict(d,code) do update set in_t=$5,out_t=$6,source='Manual',note=$7,upd=$8`,[date,s.code,s.name,s.branch,tin||'',tout||'',note||'',new Date().toISOString()]);return{ok:true}}};
 export default async function handler(req,res){try{if(req.method!=='POST')return res.status(405).json({error:'POST only'});
