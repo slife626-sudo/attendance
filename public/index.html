@@ -13,7 +13,7 @@ try{$('pin').value=localStorage.getItem('pin')||''}catch(e){}
 setInterval(()=>$('clock').textContent=new Date().toLocaleTimeString('bn-BD'),1000);
 function say(t,ok){$('msg').textContent=t;$('msg').className=ok?'ok':'err'}
 function busy(b){$('bi').disabled=$('bo').disabled=b}
-function load(){google.script.run.withSuccessHandler(r=>{const w=$('who');w.textContent='';FACE=!!r.face;if(!r.ok){w.textContent=r.message;busy(true);return}
+function load(){google.script.run.withSuccessHandler(r=>{const w=$('who');w.textContent='';FACE=!!r.face;if(FACE)faceLib().catch(()=>{});if(!r.ok){w.textContent=r.message;busy(true);return}
  [['নাম',r.name],['পদবী',r.designation],['শাখা',r.branch],['শিফট',r.shift],['আজ IN',r.in||'—'],['আজ OUT',r.out||'—']].forEach(([k,v])=>{const d=document.createElement('div');d.textContent=k+': '+v;w.appendChild(d)})}).withFailureHandler(e=>say(e.message)).staffInfo(CODE)}
 const FA='https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/';
 async function faceLib(){if(!window.faceapi)await new Promise((ok,no)=>{const s=document.createElement('script');s.src=FA+'dist/face-api.js';s.onload=ok;s.onerror=()=>no(new Error('মুখ-চেনার লাইব্রেরি লোড হয়নি — ইন্টারনেট দেখুন'));document.head.appendChild(s)});
@@ -21,11 +21,11 @@ async function faceLib(){if(!window.faceapi)await new Promise((ok,no)=>{const s=
 const dd=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
 function ear(p){const e=i=>(dd(p[i+1],p[i+5])+dd(p[i+2],p[i+4]))/(2*dd(p[i],p[i+3]));return(e(36)+e(42))/2}
 let FACE=false;
-function bk(s,e){s.n=(s.n||0)+1;if(!s.closed){if(e<.5)s.base=Math.max(s.base||0,e);if(s.n>=4&&s.base&&e<s.base*.78)s.closed=true}else if(e>s.base*.88)s.done=true;return s}
+function bk(s,e){s.n=(s.n||0)+1;if(!s.closed){if(s.n<=5){(s.cal=s.cal||[]).push(e);s.base=[...s.cal].sort((a,b)=>a-b)[s.cal.length>>1]}else if(e<s.base*.85)s.closed=true}else if(e>s.base*.9)s.done=true;return s}
 async function faceCheck(){await faceLib();const st=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:480},audio:false}),v=$('cam');v.srcObject=st;$('camw').style.display='block';await v.play();
- const fast=new faceapi.TinyFaceDetectorOptions({inputSize:160,scoreThreshold:.4}),full=new faceapi.TinyFaceDetectorOptions({inputSize:224,scoreThreshold:.5}),S={},D3=[],m=$('cmsg'),t0=Date.now();m.textContent='মুখ ক্যামেরার সামনে রাখুন...';
+ const fast=new faceapi.TinyFaceDetectorOptions({inputSize:128,scoreThreshold:.4}),full=new faceapi.TinyFaceDetectorOptions({inputSize:224,scoreThreshold:.5}),S={},D3=[],m=$('cmsg'),t0=Date.now();m.textContent='মুখ ক্যামেরার সামনে রাখুন...';
  try{while(Date.now()-t0<30000){
-  if(S.done){const r=await faceapi.detectSingleFace(v,full).withFaceLandmarks().withFaceDescriptor();if(r&&ear(r.landmarks.positions)>S.base*.85){D3.push(Array.from(r.descriptor));if(D3.length>=3)return{desc:D3,blink:true}}continue}
+  if(S.done){const r=await faceapi.detectSingleFace(v,full).withFaceLandmarks().withFaceDescriptor();if(r&&ear(r.landmarks.positions)>S.base*.8){D3.push(Array.from(r.descriptor));if(D3.length>=2)return{desc:D3,blink:true}}continue}
   const r=await faceapi.detectSingleFace(v,fast).withFaceLandmarks();
   if(r){const e=ear(r.landmarks.positions);bk(S,e);m.textContent=(S.closed?'এবার চোখ খুলুন 👀':'মুখ পাওয়া গেছে — চোখ বন্ধ করে খুলুন (একটু ধীরে) 👁️')+'  ['+e.toFixed(2)+'/'+(S.base||0).toFixed(2)+']'}
   else m.textContent='মুখ দেখা যাচ্ছে না — ক্যামেরার সামনে আসুন'}
