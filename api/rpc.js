@@ -6,6 +6,7 @@ const T={Settings:{t:'settings',c:['k','v']},Branches:{t:'branches',c:['branch',
  Staff:{t:'staff',c:['code','name','designation','branch','shift','pin','status','weekly_off']},Holidays:{t:'holidays',c:['d','name']},Leaves:{t:'leaves',c:['code','d_from','d_to','typ','note']}};
 const HEAD={Settings:['Key','Value'],Branches:['Branch','Lat','Lng','Radius'],Shifts:['Shift','Start','End'],Staff:['Code','Name','Designation','Branch','Shift','PIN','Status','WeeklyOff'],Holidays:['Date','Name'],Leaves:['Code','From','To','Type','Note']};
 const S=x=>x==null?'':String(x),nc=c=>S(c).trim().replace(/^0+(?=\d)/,''),active=s=>S(s.status||'Active').toLowerCase()!=='inactive';
+const toArr=x=>Array.isArray(x)&&x.length&&x.every(Array.isArray)?x:[x],ok128=a=>Array.isArray(a)&&a.length===128&&a.every(Number.isFinite);
 const auth=p=>{if(!process.env.ADMIN_PASS||S(p)!==process.env.ADMIN_PASS)throw new Error('পাসওয়ার্ড ভুল')};
 async function cfg(){const o={};(await q('select k,v from settings')).forEach(r=>o[r.k]=r.v);o.Timezone=o.Timezone||'Asia/Dhaka';return o}
 const now=tz=>{const d=new Date();return{date:d.toLocaleDateString('en-CA',{timeZone:tz}),time:d.toLocaleTimeString('en-GB',{timeZone:tz,hour:'2-digit',minute:'2-digit',hour12:false}),ts:d.toISOString()}};
@@ -21,9 +22,11 @@ async punch(code,pin,type,lat,lng,acc,desc,blink){const s=await findStaff(code),
  if(!s||S(s.pin).trim()!==S(pin).trim())return{ok:false,message:'PIN সঠিক নয়'};if(!active(s))return{ok:false,message:'স্টাফ সক্রিয় নয়'};
  let src='Mobile';
  if(s.face){let ref=null;try{ref=JSON.parse(s.face)}catch(e){}
-  if(!Array.isArray(desc)||desc.length!==128||!desc.every(Number.isFinite)||blink!==true)return{ok:false,message:'মুখ যাচাই সম্পন্ন হয়নি — ক্যামেরায় চোখ পিটপিট করুন'};
-  if(!Array.isArray(ref)||ref.length!==128)return{ok:false,message:'মুখের নিবন্ধন নষ্ট — অ্যাডমিনকে বলুন আবার নিবন্ধন করতে'};
-  const fd=Math.sqrt(ref.reduce((a,x,i)=>a+(x-desc[i])**2,0));if(fd>(Number(c.FaceThreshold)||0.5))return{ok:false,message:'মুখ মিলছে না ('+fd.toFixed(2)+')। নিজের মুখ দিয়ে চেষ্টা করুন'};src='Mobile+Face'}
+  const refs=Array.isArray(ref)?toArr(ref).filter(ok128):[],ds=Array.isArray(desc)?toArr(desc).filter(ok128).slice(0,5):[];
+  if(!ds.length||blink!==true)return{ok:false,message:'মুখ যাচাই সম্পন্ন হয়নি — ক্যামেরায় চোখ পিটপিট করুন'};
+  if(!refs.length)return{ok:false,message:'মুখের নিবন্ধন নষ্ট — অ্যাডমিনকে বলুন আবার নিবন্ধন করতে'};
+  let fd=9;for(const a of ds)for(const b of refs)fd=Math.min(fd,Math.sqrt(a.reduce((t,x,k)=>t+(x-b[k])**2,0)));
+  if(fd>(Number(c.FaceThreshold)||0.55))return{ok:false,message:'মুখ মিলছে না ('+fd.toFixed(2)+')। নিজের মুখ দিয়ে চেষ্টা করুন'};src='Mobile+Face'}
  else if(c.FaceRequired==='1')return{ok:false,message:'আপনার মুখ নিবন্ধন করা নেই — অ্যাডমিনের সাথে যোগাযোগ করুন'};
  lat=Number(lat);lng=Number(lng);acc=Number(acc)||0;if(!lat||!lng)return{ok:false,message:'লোকেশন পাওয়া যায়নি'};
  if(acc>(Number(c.MaxAccuracy)||100))return{ok:false,message:'GPS নির্ভুল নয় ('+Math.round(acc)+' মি)। মোবাইল থেকে হাজিরা দিন; কম্পিউটারে GPS থাকে না'};
@@ -41,7 +44,7 @@ async adminSetRow(p,n,row,arr){auth(p);const m=T[n];if(!m)throw new Error('অ�
  if(row>0)await q(`update ${m.t} set ${m.c.map((c,i)=>c+'=$'+(i+1)).join(',')} where id=$${m.c.length+1}`,[...v,row]);
  else await q(`insert into ${m.t}(${m.c.join(',')}) values(${m.c.map((_,i)=>'$'+(i+1)).join(',')})`,v);return{ok:true}},
 async adminSaveFace(p,code,json){auth(p);const s=await findStaff(code);if(!s)throw new Error('স্টাফ পাওয়া যায়নি');let a;try{a=JSON.parse(json)}catch(e){}
- if(!Array.isArray(a)||a.length!==128||!a.every(Number.isFinite))throw new Error('মুখের তথ্য সঠিক নয়');await q('update staff set face=$1 where id=$2',[JSON.stringify(a),s.id]);return{ok:true}},
+ a=Array.isArray(a)?toArr(a):[];if(!a.length||a.length>12||!a.every(ok128))throw new Error('মুখের তথ্য সঠিক নয়');await q('update staff set face=$1 where id=$2',[JSON.stringify(a),s.id]);return{ok:true}},
 async adminDelFace(p,code){auth(p);const s=await findStaff(code);if(!s)throw new Error('স্টাফ পাওয়া যায়নি');await q("update staff set face='' where id=$1",[s.id]);return{ok:true}},
 async adminDelRow(p,n,row){auth(p);if(!T[n]||n==='Settings')throw new Error('অনুমোদিত নয়');await q(`delete from ${T[n].t} where id=$1`,[row]);return{ok:true}},
 async adminSavePunch(p,code,date,tin,tout,note){auth(p);const s=await findStaff(code);if(!s)throw new Error('স্টাফ পাওয়া যায়নি');if(!/^\d{4}-\d{2}-\d{2}$/.test(date))throw new Error('তারিখ দিন');
