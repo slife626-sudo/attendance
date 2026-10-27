@@ -1,1 +1,7 @@
-{"cleanUrls":true,"regions":["sin1"],"rewrites":[{"source":"/:code(\\d+)","destination":"/index.html"}]}
+{
+  "cleanUrls": true,
+  "regions": ["sin1"],
+  "rewrites": [
+    { "source": "/:code([0-9]+)", "destination": "/" }
+  ]
+}
