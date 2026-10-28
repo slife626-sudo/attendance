@@ -3,8 +3,8 @@ const URLV=String(process.env.DATABASE_URL||'').trim().replace(/^psql\s+/,'').re
 const q=(t,p=[])=>{if(!sql){if(!URLV)throw new Error('DATABASE_URL সেট করা নেই — Vercel > Settings > Environment Variables এ দিয়ে Redeploy করুন');
  try{sql=neon(URLV)}catch(e){throw new Error('DATABASE_URL ফরম্যাট ভুল — এটা postgresql:// দিয়ে শুরু হতে হবে (কোটেশন বা psql ছাড়া)')}}return sql.query(t,p)};
 const T={Settings:{t:'settings',c:['k','v']},Branches:{t:'branches',c:['branch','lat','lng','radius']},Shifts:{t:'shifts',c:['shift','start_t','end_t']},
- Staff:{t:'staff',c:['code','name','designation','branch','shift','pin','status','weekly_off']},Holidays:{t:'holidays',c:['d','name']},Leaves:{t:'leaves',c:['code','d_from','d_to','typ','note','status','applied_on','reason']},LeaveTypes:{t:'leave_types',c:['ltype','days','paid','kind']}};
-const HEAD={Settings:['Key','Value'],Branches:['Branch','Lat','Lng','Radius'],Shifts:['Shift','Start','End'],Staff:['Code','Name','Designation','Branch','Shift','PIN','Status','WeeklyOff'],Holidays:['Date','Name'],Leaves:['Code','From','To','Type','Note','Status','Applied','Reason'],LeaveTypes:['Type','YearlyDays','Paid','Kind']};
+ Staff:{t:'staff',c:['code','name','designation','branch','shift','pin','status','weekly_off']},Holidays:{t:'holidays',c:['d','d_to','name','branch']},Leaves:{t:'leaves',c:['code','d_from','d_to','typ','note','status','applied_on','reason']},LeaveTypes:{t:'leave_types',c:['ltype','days','paid','kind']}};
+const HEAD={Settings:['Key','Value'],Branches:['Branch','Lat','Lng','Radius'],Shifts:['Shift','Start','End'],Staff:['Code','Name','Designation','Branch','Shift','PIN','Status','WeeklyOff'],Holidays:['Date','To','Name','Branch'],Leaves:['Code','From','To','Type','Note','Status','Applied','Reason'],LeaveTypes:['Type','YearlyDays','Paid','Kind']};
 const S=x=>x==null?'':String(x),nc=c=>S(c).trim().replace(/^0+(?=\d)/,''),active=s=>S(s.status||'Active').toLowerCase()!=='inactive';
 const toArr=x=>Array.isArray(x)&&x.length&&x.every(Array.isArray)?x:[x],ok128=a=>Array.isArray(a)&&a.length===128&&a.every(Number.isFinite);
 const auth=p=>{if(!process.env.ADMIN_PASS||S(p)!==process.env.ADMIN_PASS)throw new Error('পাসওয়ার্ড ভুল')};
@@ -20,9 +20,12 @@ const DN=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'],okD=d=>/^\d{4}-\d{2}-\d{2}$
 const DEFLT={name:'সংরক্ষিত ছুটি',days:12,paid:true,holiday:false};
 async function leaveTypes(){const m={};let main='';(await q('select * from leave_types order by id')).forEach(t=>{const n=S(t.ltype).trim();if(!n)return;const dv=S(t.days).trim(),dn=dv===''?null:Number(dv),o={name:n,days:(dn==null||isNaN(dn))?null:dn,paid:S(t.paid||'Yes').trim().toLowerCase()!=='no',holiday:S(t.kind).trim().toLowerCase()==='holiday'};m[n]=o;if(!main&&o.days!=null&&o.paid&&!o.holiday)main=n});
  if(!Object.keys(m).length){m[DEFLT.name]=DEFLT;main=DEFLT.name}return{m,main}}
-function leaveCalc(code,leaves,lt,hols,offs,year){const set={},by={};
+const brList=b=>S(b).split(/[,،]/).map(x=>x.trim().toLowerCase()).filter(Boolean);
+function holMap(rows,branch){const m={},bl=S(branch).trim().toLowerCase();rows.forEach(h=>{const from=S(h.d).trim(),to=S(h.d_to).trim()||from;if(!okD(from)||!okD(to)||to<from)return;const L=brList(h.branch);if(L.length&&L.indexOf(bl)<0)return;rng(from,to).forEach(d=>{if(!m[d])m[d]=S(h.name)||'ছুটি'})});return m}
+function leaveCalc(code,leaves,lt,hols,offs,year){const set={},by={},hk={};
+ leaves.filter(l=>nc(l.code)===nc(code)&&approved(l)&&okD(S(l.d_from))&&okD(S(l.d_to))&&(lt.m[S(l.typ).trim()]||{}).holiday).forEach(l=>rng(S(l.d_from),S(l.d_to)).forEach(d=>hk[d]=1));
  leaves.filter(l=>nc(l.code)===nc(code)&&approved(l)).sort((a,b)=>S(a.d_from).localeCompare(S(b.d_from))).forEach(l=>{if(!okD(S(l.d_from))||!okD(S(l.d_to)))return;const t=lt.m[S(l.typ).trim()]||lt.m[lt.main]||DEFLT;if(t.holiday)return;
-  rng(S(l.d_from),S(l.d_to)).forEach(d=>{if(d.slice(0,4)!==String(year)||hols[d]||offs.indexOf(wd(d))>=0||set[d])return;set[d]=t.name})});
+  rng(S(l.d_from),S(l.d_to)).forEach(d=>{if(d.slice(0,4)!==String(year)||hols[d]||hk[d]||offs.indexOf(wd(d))>=0||set[d])return;set[d]=t.name})});
  Object.keys(set).sort().forEach(d=>(by[set[d]]=by[set[d]]||[]).push(d));return by}
 const balOf=(lt,by)=>Object.values(lt.m).filter(t=>!t.holiday).map(t=>{const used=(by[t.name]||[]).length,pd=!t.paid?0:(t.days==null?used:Math.min(used,t.days));return{type:t.name,quota:t.days,paid:t.paid,used,unpaid:used-pd,left:(t.paid&&t.days!=null)?Math.max(0,t.days-used):null}});
 async function staffAuth(code,pin){const s=await findStaff(code);if(!s||S(s.pin).trim()!==S(pin).trim())return{err:'PIN সঠিক নয়'};if(!active(s))return{err:'স্টাফ সক্রিয় নয়'};return{s}}
@@ -80,7 +83,7 @@ async deviceSync(key,rows){const k=process.env.DEVICE_KEY||process.env.ADMIN_PAS
   await q(`insert into attendance(d,code,name,branch,in_t,out_t,source,upd) values($1,$2,$3,$4,$5,$6,$7,$8) on conflict(d,code) do update set in_t=$5,out_t=$6,source=$7,upd=$8`,[d,s.code,s.name,s.branch,tin,tout,src,new Date().toISOString()]);saved++}
  return{ok:true,saved,manual,unknown:[...unknown]}},
 async leaveApply(code,pin,type,from,to,reason){const a=await staffAuth(code,pin);if(a.err)return{ok:false,message:a.err};const r=await leaveAdd(a.s,type,from,to,reason,'Pending','staff');return r.ok?{ok:true,message:'আবেদন জমা হয়েছে — অনুমোদনের অপেক্ষায়'}:r},
-async leaveMine(code,pin){const a=await staffAuth(code,pin);if(a.err)return{ok:false,message:a.err};const s=a.s,c=await cfg(),year=Number(now(c.Timezone).date.slice(0,4)),lt=await leaveTypes(),all=await q('select * from leaves'),hols={};(await q('select d from holidays')).forEach(h=>hols[S(h.d)]=1);
+async leaveMine(code,pin){const a=await staffAuth(code,pin);if(a.err)return{ok:false,message:a.err};const s=a.s,c=await cfg(),year=Number(now(c.Timezone).date.slice(0,4)),lt=await leaveTypes(),all=await q('select * from leaves'),hols=holMap(await q('select * from holidays'),s.branch);
  const by=leaveCalc(s.code,all,lt,hols,S(s.weekly_off||c.WeeklyOff||'Fri').split(/[ ,]+/),year);
  return{ok:true,year,types:Object.values(lt.m).filter(t=>!t.holiday).map(t=>t.name),bal:balOf(lt,by),
   apps:all.filter(l=>nc(l.code)===nc(s.code)).sort((x,y)=>y.id-x.id).slice(0,15).map(l=>({id:l.id,type:S(l.typ),from:S(l.d_from),to:S(l.d_to),status:S(l.status).trim()||'Approved',reason:S(l.reason),note:S(l.note)}))}},
