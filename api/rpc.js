@@ -23,7 +23,7 @@ async punch(code,pin,type,lat,lng,acc,desc,blink){const s=await findStaff(code),
  let src='Mobile';
  if(s.face){let ref=null;try{ref=JSON.parse(s.face)}catch(e){}
   const refs=Array.isArray(ref)?toArr(ref).filter(ok128):[],ds=Array.isArray(desc)?toArr(desc).filter(ok128).slice(0,5):[];
-  if(!ds.length||blink!==true)return{ok:false,message:'মুখ যাচাই সম্পন্ন হয়নি — ক্যামেরায় চোখ পিটপিট করুন'};
+  if(!ds.length)return{ok:false,message:'মুখ যাচাই সম্পন্ন হয়নি — ক্যামেরার সামনে সোজা তাকান'};
   if(!refs.length)return{ok:false,message:'মুখের নিবন্ধন নষ্ট — অ্যাডমিনকে বলুন আবার নিবন্ধন করতে'};
   let fd=9;for(const a of ds)for(const b of refs)fd=Math.min(fd,Math.sqrt(a.reduce((t,x,k)=>t+(x-b[k])**2,0)));
   if(fd>(Number(c.FaceThreshold)||0.55))return{ok:false,message:'মুখ মিলছে না ('+fd.toFixed(2)+')। নিজের মুখ দিয়ে চেষ্টা করুন'};src='Mobile+Face'}
@@ -48,6 +48,19 @@ async adminSaveFace(p,code,json){auth(p);const s=await findStaff(code);if(!s)thr
 async adminDelFace(p,code){auth(p);const s=await findStaff(code);if(!s)throw new Error('স্টাফ পাওয়া যায়নি');await q("update staff set face='' where id=$1",[s.id]);return{ok:true}},
 async adminDelRow(p,n,row){auth(p);if(!T[n]||n==='Settings')throw new Error('অনুমোদিত নয়');await q(`delete from ${T[n].t} where id=$1`,[row]);return{ok:true}},
 async adminDelPunch(p,code,date){auth(p);if(!/^\d{4}-\d{2}-\d{2}$/.test(date))throw new Error('তারিখ দিন');const s=await findStaff(code);if(!s)throw new Error('স্টাফ পাওয়া যায়নি');await q('delete from attendance where d=$1 and code=$2',[date,s.code]);return{ok:true}},
+async deviceSync(key,rows){const k=process.env.DEVICE_KEY||process.env.ADMIN_PASS;if(!k||S(key)!==k)throw new Error('কী ভুল');
+ if(!Array.isArray(rows)||rows.length>500)throw new Error('ডাটা সঠিক নয়');
+ const c=await cfg(),gap=Number(c.DeviceMinGap)||10,staff=await q('select * from staff'),by={},unknown=new Set();
+ for(const r of rows){const m=/^(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})/.exec(S(r&&r.ts));if(!m)continue;const s=staff.find(x=>nc(x.code)===nc(r.code));
+  if(!s||!active(s)){unknown.add(S(r.code));continue}const k2=m[1]+'|'+nc(s.code);(by[k2]=by[k2]||{d:m[1],s,t:[]}).t.push(m[2]+':'+m[3])}
+ const ds=Object.values(by).map(x=>x.d).sort(),ex={};
+ if(ds.length)(await q('select * from attendance where d>=$1 and d<=$2',[ds[0],ds[ds.length-1]])).forEach(a=>ex[a.d+'|'+nc(a.code)]=a);
+ const mins=t=>+t.slice(0,2)*60+ +t.slice(3,5);let saved=0,manual=0;
+ for(const k2 in by){const{d,s,t}=by[k2],a=ex[k2];if(a&&a.source==='Manual'){manual++;continue}
+  const all=[...t,a&&a.in_t,a&&a.out_t].filter(Boolean).sort(),tin=all[0],last=all[all.length-1],tout=mins(last)-mins(tin)>=gap?last:(a&&a.out_t)||'',
+  src=a?(S(a.source).includes('Device')?a.source:(S(a.source)||'Mobile')+'+Device'):'Device';
+  await q(`insert into attendance(d,code,name,branch,in_t,out_t,source,upd) values($1,$2,$3,$4,$5,$6,$7,$8) on conflict(d,code) do update set in_t=$5,out_t=$6,source=$7,upd=$8`,[d,s.code,s.name,s.branch,tin,tout,src,new Date().toISOString()]);saved++}
+ return{ok:true,saved,manual,unknown:[...unknown]}},
 async adminSavePunch(p,code,date,tin,tout,note){auth(p);const s=await findStaff(code);if(!s)throw new Error('স্টাফ পাওয়া যায়নি');if(!/^\d{4}-\d{2}-\d{2}$/.test(date))throw new Error('তারিখ দিন');
  await q(`insert into attendance(d,code,name,branch,in_t,out_t,source,note,upd) values($1,$2,$3,$4,$5,$6,'Manual',$7,$8) on conflict(d,code) do update set in_t=$5,out_t=$6,source='Manual',note=$7,upd=$8`,[date,s.code,s.name,s.branch,tin||'',tout||'',note||'',new Date().toISOString()]);return{ok:true}}};
 export default async function handler(req,res){try{if(req.method!=='POST')return res.status(405).json({error:'POST only'});
