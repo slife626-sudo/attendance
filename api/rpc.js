@@ -3,8 +3,8 @@ const URLV=String(process.env.DATABASE_URL||'').trim().replace(/^psql\s+/,'').re
 const q=(t,p=[])=>{if(!sql){if(!URLV)throw new Error('DATABASE_URL সেট করা নেই — Vercel > Settings > Environment Variables এ দিয়ে Redeploy করুন');
  try{sql=neon(URLV)}catch(e){throw new Error('DATABASE_URL ফরম্যাট ভুল — এটা postgresql:// দিয়ে শুরু হতে হবে (কোটেশন বা psql ছাড়া)')}}return sql.query(t,p)};
 const T={Settings:{t:'settings',c:['k','v']},Branches:{t:'branches',c:['branch','lat','lng','radius']},Shifts:{t:'shifts',c:['shift','start_t','end_t']},
- Staff:{t:'staff',c:['code','name','designation','branch','shift','pin','status','weekly_off']},Holidays:{t:'holidays',c:['d','d_to','name','branch']},Leaves:{t:'leaves',c:['code','d_from','d_to','typ','note','status','applied_on','reason']},LeaveTypes:{t:'leave_types',c:['ltype','days','paid','kind']}};
-const HEAD={Settings:['Key','Value'],Branches:['Branch','Lat','Lng','Radius'],Shifts:['Shift','Start','End'],Staff:['Code','Name','Designation','Branch','Shift','PIN','Status','WeeklyOff'],Holidays:['Date','To','Name','Branch'],Leaves:['Code','From','To','Type','Note','Status','Applied','Reason'],LeaveTypes:['Type','YearlyDays','Paid','Kind']};
+ Staff:{t:'staff',c:['code','name','designation','branch','shift','pin','status','weekly_off']},Holidays:{t:'holidays',c:['d','d_to','name','branch']},Leaves:{t:'leaves',c:['code','d_from','d_to','typ','note','status','applied_on','reason']},LeaveTypes:{t:'leave_types',c:['ltype','days','paid','kind']},Transfers:{t:'transfers',c:['code','eff','from_branch','to_branch']}};
+const HEAD={Settings:['Key','Value'],Branches:['Branch','Lat','Lng','Radius'],Shifts:['Shift','Start','End'],Staff:['Code','Name','Designation','Branch','Shift','PIN','Status','WeeklyOff'],Holidays:['Date','To','Name','Branch'],Leaves:['Code','From','To','Type','Note','Status','Applied','Reason'],LeaveTypes:['Type','YearlyDays','Paid','Kind'],Transfers:['Code','Effective','FromBranch','ToBranch']};
 const S=x=>x==null?'':String(x),nc=c=>S(c).trim().replace(/^0+(?=\d)/,''),active=s=>S(s.status||'Active').toLowerCase()!=='inactive';
 const toArr=x=>Array.isArray(x)&&x.length&&x.every(Array.isArray)?x:[x],ok128=a=>Array.isArray(a)&&a.length===128&&a.every(Number.isFinite);
 const auth=p=>{if(!process.env.ADMIN_PASS||S(p)!==process.env.ADMIN_PASS)throw new Error('পাসওয়ার্ড ভুল')};
@@ -21,7 +21,9 @@ const DEFLT={name:'সংরক্ষিত ছুটি',days:12,paid:true,holi
 async function leaveTypes(){const m={};let main='';(await q('select * from leave_types order by id')).forEach(t=>{const n=S(t.ltype).trim();if(!n)return;const dv=S(t.days).trim(),dn=dv===''?null:Number(dv),o={name:n,days:(dn==null||isNaN(dn))?null:dn,paid:S(t.paid||'Yes').trim().toLowerCase()!=='no',holiday:S(t.kind).trim().toLowerCase()==='holiday'};m[n]=o;if(!main&&o.days!=null&&o.paid&&!o.holiday)main=n});
  if(!Object.keys(m).length){m[DEFLT.name]=DEFLT;main=DEFLT.name}return{m,main}}
 const brList=b=>S(b).split(/[,،]/).map(x=>x.trim().toLowerCase()).filter(Boolean);
-function holMap(rows,branch){const m={},bl=S(branch).trim().toLowerCase();rows.forEach(h=>{const from=S(h.d).trim(),to=S(h.d_to).trim()||from;if(!okD(from)||!okD(to)||to<from)return;const L=brList(h.branch);if(L.length&&L.indexOf(bl)<0)return;rng(from,to).forEach(d=>{if(!m[d])m[d]=S(h.name)||'ছুটি'})});return m}
+function holMap(rows,branch){const m={};rows.forEach(h=>{const from=S(h.d).trim(),to=S(h.d_to).trim()||from;if(!okD(from)||!okD(to)||to<from)return;const L=brList(h.branch);rng(from,to).forEach(d=>{const bl=S(typeof branch==='function'?branch(d):branch).trim().toLowerCase();if(L.length&&L.indexOf(bl)<0)return;if(!m[d])m[d]=S(h.name)||'ছুটি'})});return m}
+async function loadTr(){try{return await q('select * from transfers')}catch(e){return[]}}
+function branchAt(s,TR,date){const L=TR.filter(t=>nc(t.code)===nc(s.code)).sort((a,b)=>S(a.eff).localeCompare(S(b.eff)));if(!L.length)return S(s.branch);if(date<S(L[0].eff))return S(L[0].from_branch);let b=S(L[0].to_branch);for(const t of L)if(S(t.eff)<=date)b=S(t.to_branch);return b}
 function leaveCalc(code,leaves,lt,hols,offs,year){const set={},by={},hk={};
  leaves.filter(l=>nc(l.code)===nc(code)&&approved(l)&&okD(S(l.d_from))&&okD(S(l.d_to))&&(lt.m[S(l.typ).trim()]||{}).holiday).forEach(l=>rng(S(l.d_from),S(l.d_to)).forEach(d=>hk[d]=1));
  leaves.filter(l=>nc(l.code)===nc(code)&&approved(l)).sort((a,b)=>S(a.d_from).localeCompare(S(b.d_from))).forEach(l=>{if(!okD(S(l.d_from))||!okD(S(l.d_to)))return;const t=lt.m[S(l.typ).trim()]||lt.m[lt.main]||DEFLT;if(t.holiday)return;
@@ -38,7 +40,7 @@ async function leaveAdd(s,type,from,to,reason,status,by){from=S(from).trim();to=
 const F={
 async staffInfo(code){const s=await findStaff(code);if(!s)return{ok:false,message:'স্টাফ পাওয়া যায়নি'};if(!active(s))return{ok:false,message:'এই স্টাফ সক্রিয় নয়'};
  const c=await cfg(),a=(await q('select in_t,out_t from attendance where d=$1 and code=$2',[now(c.Timezone).date,s.code]))[0]||{},w=await shiftOf(s);
- return{ok:true,face:!!s.face,name:s.name,designation:s.designation,branch:s.branch,shift:w.start+' - '+w.end,in:a.in_t||'',out:a.out_t||''}},
+ return{ok:true,face:!!s.face,name:s.name,designation:s.designation,branch:branchAt(s,await loadTr(),now(c.Timezone).date),shift:w.start+' - '+w.end,in:a.in_t||'',out:a.out_t||''}},
 async punch(code,pin,type,lat,lng,acc,desc,blink){const s=await findStaff(code),c=await cfg();
  if(!s||S(s.pin).trim()!==S(pin).trim())return{ok:false,message:'PIN সঠিক নয়'};if(!active(s))return{ok:false,message:'স্টাফ সক্রিয় নয়'};
  let src='Mobile';
@@ -51,15 +53,15 @@ async punch(code,pin,type,lat,lng,acc,desc,blink){const s=await findStaff(code),
  else if(c.FaceRequired==='1')return{ok:false,message:'আপনার মুখ নিবন্ধন করা নেই — অ্যাডমিনের সাথে যোগাযোগ করুন'};
  lat=Number(lat);lng=Number(lng);acc=Number(acc)||0;if(!lat||!lng)return{ok:false,message:'লোকেশন পাওয়া যায়নি'};
  if(acc>(Number(c.MaxAccuracy)||100))return{ok:false,message:'GPS নির্ভুল নয় ('+Math.round(acc)+' মি)। মোবাইল থেকে হাজিরা দিন; কম্পিউটারে GPS থাকে না'};
- const b=(await q('select * from branches where branch=$1',[s.branch]))[0];if(!b||!Number(b.lat)||!Number(b.lng))return{ok:false,message:'এই শাখার লোকেশন সেট করা নেই'};
+ const tb=branchAt(s,await loadTr(),now(c.Timezone).date),b=(await q('select * from branches where branch=$1',[tb]))[0];if(!b||!Number(b.lat)||!Number(b.lng))return{ok:false,message:'এই শাখার লোকেশন সেট করা নেই'};
  const d=Math.round(dist(lat,lng,Number(b.lat),Number(b.lng)));if(d>(Number(b.radius)||150))return{ok:false,message:'আপনি শাখা থেকে '+d+' মিটার দূরে আছেন'};
  const n=now(c.Timezone),a=(await q('select * from attendance where d=$1 and code=$2',[n.date,s.code]))[0];
  if(type==='IN'){if(a&&a.in_t)return{ok:false,message:'আজ আপনি '+a.in_t+'-এ IN দিয়েছেন'};
-  await q(`insert into attendance(d,code,name,branch,in_t,in_dist,source,upd) values($1,$2,$3,$4,$5,$6,$8,$7) on conflict(d,code) do update set in_t=$5,in_dist=$6,upd=$7`,[n.date,s.code,s.name,s.branch,n.time,String(d),n.ts,src]);}
+  await q(`insert into attendance(d,code,name,branch,in_t,in_dist,source,upd) values($1,$2,$3,$4,$5,$6,$8,$7) on conflict(d,code) do update set in_t=$5,in_dist=$6,upd=$7`,[n.date,s.code,s.name,tb,n.time,String(d),n.ts,src]);}
  else{if(!a||!a.in_t)return{ok:false,message:'আগে IN দিন'};await q('update attendance set out_t=$3,out_dist=$4,upd=$5 where d=$1 and code=$2',[n.date,s.code,n.time,String(d),n.ts]);}
  return{ok:true,message:type+' সফল হয়েছে: '+n.time}},
 async adminData(p,month){auth(p);const c=await cfg(),o={month,today:now(c.Timezone).date,tabs:{},att:[],faces:(await q("select code from staff where face is not null and face<>''")).map(x=>x.code)};
- for(const n of Object.keys(T)){try{o.tabs[n]=await sheet(n)}catch(e){throw new Error('ডেটাবেস আপডেট বাকি — leave.sql চালান ('+n+')')}}
+ for(const n of Object.keys(T)){try{o.tabs[n]=await sheet(n)}catch(e){if(n==='Transfers')o.tabs[n]={head:HEAD[n],rows:[]};else throw new Error('ডেটাবেস আপডেট বাকি — leave.sql চালান ('+n+')')}}
  (await q('select d,code,in_t,out_t,note from attendance where d like $1',[month+'%'])).forEach(r=>o.att.push({d:r.d,c:r.code,in:r.in_t||'',out:r.out_t||'',note:r.note||''}));return o},
 async adminSetRow(p,n,row,arr){auth(p);const m=T[n];if(!m)throw new Error('অনুমোদিত নয়');const v=m.c.map((_,i)=>S(arr[i]).trim());
  if(row>0)await q(`update ${m.t} set ${m.c.map((c,i)=>c+'=$'+(i+1)).join(',')} where id=$${m.c.length+1}`,[...v,row]);
@@ -71,7 +73,7 @@ async adminDelRow(p,n,row){auth(p);if(!T[n]||n==='Settings')throw new Error('অ
 async adminDelPunch(p,code,date){auth(p);if(!/^\d{4}-\d{2}-\d{2}$/.test(date))throw new Error('তারিখ দিন');const s=await findStaff(code);if(!s)throw new Error('স্টাফ পাওয়া যায়নি');await q('delete from attendance where d=$1 and code=$2',[date,s.code]);return{ok:true}},
 async deviceSync(key,rows){const k=process.env.DEVICE_KEY||process.env.ADMIN_PASS;if(!k||S(key)!==k)throw new Error('কী ভুল');
  if(!Array.isArray(rows)||rows.length>500)throw new Error('ডাটা সঠিক নয়');
- const c=await cfg(),gap=Number(c.DeviceMinGap)||10,staff=await q('select * from staff'),by={},unknown=new Set();
+ const c=await cfg(),gap=Number(c.DeviceMinGap)||10,staff=await q('select * from staff'),TR=await loadTr(),by={},unknown=new Set();
  for(const r of rows){const m=/^(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})/.exec(S(r&&r.ts));if(!m)continue;const s=staff.find(x=>nc(x.code)===nc(r.code));
   if(!s||!active(s)){unknown.add(S(r.code));continue}const k2=m[1]+'|'+nc(s.code);(by[k2]=by[k2]||{d:m[1],s,t:[]}).t.push(m[2]+':'+m[3])}
  const ds=Object.values(by).map(x=>x.d).sort(),ex={};
@@ -80,10 +82,10 @@ async deviceSync(key,rows){const k=process.env.DEVICE_KEY||process.env.ADMIN_PAS
  for(const k2 in by){const{d,s,t}=by[k2],a=ex[k2];if(a&&a.source==='Manual'){manual++;continue}
   const all=[...t,a&&a.in_t,a&&a.out_t].filter(Boolean).sort(),tin=all[0],last=all[all.length-1],tout=mins(last)-mins(tin)>=gap?last:(a&&a.out_t)||'',
   src=a?(S(a.source).includes('Device')?a.source:(S(a.source)||'Mobile')+'+Device'):'Device';
-  await q(`insert into attendance(d,code,name,branch,in_t,out_t,source,upd) values($1,$2,$3,$4,$5,$6,$7,$8) on conflict(d,code) do update set in_t=$5,out_t=$6,source=$7,upd=$8`,[d,s.code,s.name,s.branch,tin,tout,src,new Date().toISOString()]);saved++}
+  await q(`insert into attendance(d,code,name,branch,in_t,out_t,source,upd) values($1,$2,$3,$4,$5,$6,$7,$8) on conflict(d,code) do update set in_t=$5,out_t=$6,source=$7,upd=$8`,[d,s.code,s.name,branchAt(s,TR,d),tin,tout,src,new Date().toISOString()]);saved++}
  return{ok:true,saved,manual,unknown:[...unknown]}},
 async leaveApply(code,pin,type,from,to,reason){const a=await staffAuth(code,pin);if(a.err)return{ok:false,message:a.err};const r=await leaveAdd(a.s,type,from,to,reason,'Pending','staff');return r.ok?{ok:true,message:'আবেদন জমা হয়েছে — অনুমোদনের অপেক্ষায়'}:r},
-async leaveMine(code,pin){const a=await staffAuth(code,pin);if(a.err)return{ok:false,message:a.err};const s=a.s,c=await cfg(),year=Number(now(c.Timezone).date.slice(0,4)),lt=await leaveTypes(),all=await q('select * from leaves'),hols=holMap(await q('select * from holidays'),s.branch);
+async leaveMine(code,pin){const a=await staffAuth(code,pin);if(a.err)return{ok:false,message:a.err};const s=a.s,c=await cfg(),year=Number(now(c.Timezone).date.slice(0,4)),lt=await leaveTypes(),all=await q('select * from leaves'),TR=await loadTr(),hols=holMap(await q('select * from holidays'),d=>branchAt(s,TR,d));
  const by=leaveCalc(s.code,all,lt,hols,S(s.weekly_off||c.WeeklyOff||'Fri').split(/[ ,]+/),year);
  return{ok:true,year,types:Object.values(lt.m).filter(t=>!t.holiday).map(t=>t.name),bal:balOf(lt,by),
   apps:all.filter(l=>nc(l.code)===nc(s.code)).sort((x,y)=>y.id-x.id).slice(0,15).map(l=>({id:l.id,type:S(l.typ),from:S(l.d_from),to:S(l.d_to),status:S(l.status).trim()||'Approved',reason:S(l.reason),note:S(l.note)}))}},
@@ -93,7 +95,17 @@ async adminLeaveAdd(p,code,type,from,to,reason){auth(p);const s=await findStaff(
 async adminLeaveDecide(p,id,status,note){auth(p);if(status!=='Approved'&&status!=='Rejected')throw new Error('অবস্থা ভুল');const l=(await q('select * from leaves where id=$1',[id]))[0];if(!l)throw new Error('আবেদন পাওয়া যায়নি');
  await q('update leaves set status=$1,note=$2 where id=$3',[status,S(note).slice(0,200),id]);return{ok:true}},
 async adminYear(p,year){auth(p);if(!/^\d{4}$/.test(S(year)))throw new Error('বছর সঠিক নয়');return(await q('select d,code,in_t,out_t,note from attendance where d like $1',[S(year)+'%'])).map(r=>({d:r.d,c:r.code,in:r.in_t||'',out:r.out_t||'',note:r.note||''}))},
+async adminTransferAdd(p,code,eff,nb){auth(p);const s=await findStaff(code);if(!s)throw new Error('স্টাফ পাওয়া যায়নি');eff=S(eff).trim();nb=S(nb).trim();if(!okD(eff))throw new Error('তারিখ দিন');if(!nb)throw new Error('নতুন শাখা বাছুন');
+ if(!(await q('select * from branches where branch=$1',[nb])).length)throw new Error('এই নামে কোনো শাখা নেই');
+ let TR;try{TR=await q('select * from transfers')}catch(e){throw new Error('ডেটাবেস আপডেট বাকি — transfer.sql চালান')}
+ const mine=TR.filter(t=>nc(t.code)===nc(s.code)).sort((a,b)=>S(a.eff).localeCompare(S(b.eff))),last=mine[mine.length-1];
+ if(last&&eff<=S(last.eff))throw new Error('এই কর্মীর সর্বশেষ বদলি '+S(last.eff)+' তারিখে। নতুন বদলির তারিখ তার পরে হতে হবে (দরকার হলে আগে পরের বদলিটা মুছুন)');
+ const old=last?S(last.to_branch):S(s.branch);if(old.trim().toLowerCase()===nb.toLowerCase())throw new Error('কর্মী আগে থেকেই এই শাখায় আছেন');
+ await q('insert into transfers(code,eff,from_branch,to_branch) values($1,$2,$3,$4)',[s.code,eff,old,nb]);await q('update staff set branch=$1 where code=$2',[nb,s.code]);return{ok:true,from:old,to:nb}},
+async adminTransferDel(p,id){auth(p);const TR=await q('select * from transfers'),t=TR.find(x=>String(x.id)===String(id));if(!t)throw new Error('বদলি পাওয়া যায়নি');
+ if(TR.some(x=>nc(x.code)===nc(t.code)&&S(x.eff)>S(t.eff)))throw new Error('আগে এই কর্মীর পরের বদলিটা মুছুন');
+ await q('delete from transfers where id=$1',[t.id]);await q('update staff set branch=$1 where code=$2',[S(t.from_branch),t.code]);return{ok:true}},
 async adminSavePunch(p,code,date,tin,tout,note){auth(p);const s=await findStaff(code);if(!s)throw new Error('স্টাফ পাওয়া যায়নি');if(!/^\d{4}-\d{2}-\d{2}$/.test(date))throw new Error('তারিখ দিন');
- await q(`insert into attendance(d,code,name,branch,in_t,out_t,source,note,upd) values($1,$2,$3,$4,$5,$6,'Manual',$7,$8) on conflict(d,code) do update set in_t=$5,out_t=$6,source='Manual',note=$7,upd=$8`,[date,s.code,s.name,s.branch,tin||'',tout||'',note||'',new Date().toISOString()]);return{ok:true}}};
+ await q(`insert into attendance(d,code,name,branch,in_t,out_t,source,note,upd) values($1,$2,$3,$4,$5,$6,'Manual',$7,$8) on conflict(d,code) do update set in_t=$5,out_t=$6,source='Manual',note=$7,upd=$8`,[date,s.code,s.name,branchAt(s,await loadTr(),date),tin||'',tout||'',note||'',new Date().toISOString()]);return{ok:true}}};
 export default async function handler(req,res){try{if(req.method!=='POST')return res.status(405).json({error:'POST only'});
  const{fn,args=[]}=req.body||{};if(!F[fn])throw new Error('অজানা অনুরোধ');res.json({data:await F[fn](...args)})}catch(e){res.json({error:e.message})}}
