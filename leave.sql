@@ -9,3 +9,7 @@ insert into leave_types(ltype,days,paid,kind) values
  ('শাখা ছুটি','','Yes','Holiday'),
  ('বিনা বেতনে ছুটি','','No','Leave')
 on conflict(ltype) do nothing;
+
+-- Holidays: তারিখের পরিসীমা (To) ও শাখা (Branch)। Branch ফাঁকা = সব শাখা।
+alter table holidays add column if not exists d_to text default '';
+alter table holidays add column if not exists branch text default '';
