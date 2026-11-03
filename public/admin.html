@@ -112,9 +112,11 @@ function build_(s,X){const code=nc_(s.Code),sh=X.shifts[s.Shift]||{start:'09:30'
   else if(lv){const LI=leaveInfo(code,offs,X),I=LI.dates[date]||{},t=ltOf(X,I.type||lv.type),un=!datePaidC(LI,date,t);r.st=un?'বিনা বেতনে ছুটি':'ছুটি';r.cls=un?'u':'v';r.note=(lv.type||'')+(un&&t.paid?(lv.type?' · ':'')+(I.prob?'শিক্ষানবিস কাল':'সবেতন কোটা শেষ'):'');sum.leave++;if(un)sum.leaveUnpaid++;else sum.leavePaid++;}
   else{sum.work++;
    if(inM===null){r.st='অনুপস্থিত';r.cls='a';sum.absent++;}
-   else{sum.present++;
-    if(inM>S+X.grace){sum.late++;r.st='দেরিতে';r.cls='l';r.note=r.note||('শিফটের '+(inM-S)+' মিনিট পরে');}
-    if(outM===null||outM===inM){sum.incomplete++;r.st='অসম্পূর্ণ';r.cls='i';r.note=r.note||'আউট পাঞ্চ নেই';}
+   else{sum.present++;const lateB=inM>S+X.grace,missOut=outM===null||outM===inM;
+    if(lateB){sum.late++;r.st='দেরিতে';r.cls='l';r.note=r.note||('শিফটের '+(inM-S)+' মিনিট পরে');}
+    if(missOut){sum.incomplete++;const an=(a&&a.note)||'';
+     if(lateB){r.st=bn(inM-S)+' মিনিট লেট';r.cls='l';r.note=(an?an+' · ':'')+'আউট পাঞ্চ নেই'}
+     else{r.st='উপস্থিত';r.cls='p';r.note=(an?an+' · ':'')+'আউট পাঞ্চ নেই'}}
     else{r.mins=span();sum.workMin+=r.mins;if(outM>E)sum.otMin+=outM-E;else if(outM<E)r.note=r.note||'শিফটের আগে বের হয়েছেন';}}}
   days.push(r);}
  return{days,sum};}
@@ -125,17 +127,17 @@ function adminSummary(p,month,branch){auth_(p);const X=ctx_(month),bl=String(bra
  const rows=rows_('Staff').filter(s=>inScope(s,mFrom(X),mTo(X))).map(s=>({s,br:brSpan(s,X.tm,mFrom(X),mTo(X))})).filter(x=>!bl||x.br.some(b=>b.toLowerCase()===bl))
   .map(x=>{X.only=bl;const sum=build_(x.s,X).sum;X.only='';return{code:String(x.s.Code),name:x.s.Name,designation:x.s.Designation,branch:x.br.join(' → '),sum}});
  return{org:X.c.OrgName,addr:X.c.Address,branch:branch||'সকল শাখা',rows};}
-function adminDashboard(p,month){auth_(p);const X=ctx_(month),list=rows_('Staff').filter(s=>inScope(s,mFrom(X),mTo(X))),
+function adminDashboard(p,month,date){auth_(p);const X=ctx_(month),day=date&&/^\d{4}-\d{2}-\d{2}$/.test(date)?date:X.today,list=rows_('Staff').filter(s=>inScope(s,mFrom(X),mTo(X))),
  T={present:0,late:0,absent:0,leave:0,off:0},tot={work:0,present:0,late:0,absent:0,leave:0,otMin:0,off:0},daily={},br={},rows=[],late=[],abs=[],P=['p','l','i'];
  list.forEach(s=>{const b=build_(s,X),m=b.sum;['work','present','late','absent','leave','otMin'].forEach(k=>tot[k]+=m[k]);tot.off+=m.off+m.holiday;
   b.days.forEach(d=>{if(P.indexOf(d.cls)>=0)daily[d.date]=(daily[d.date]||0)+1;
-   if(d.date===X.today&&empOn(s,X.today)){rows.push({name:s.Name,branch:bAt(s,X.tm,X.today),in:d.in,out:d.out,st:d.st,cls:d.cls});
+   if(d.date===day&&empOn(s,day)){rows.push({name:s.Name,branch:bAt(s,X.tm,day),in:d.in,out:d.out,st:d.st,cls:d.cls});
     if(P.concat('d').indexOf(d.cls)>=0)T.present++;if(d.cls==='l')T.late++;if(d.cls==='a')T.absent++;if(d.cls==='v'||d.cls==='u')T.leave++;if(d.cls==='o')T.off++;}});
   const bls=brSpan(s,X.tm,mFrom(X),mTo(X));bls.forEach(bb=>{let mm=m;if(bls.length>1){X.only=String(bb).toLowerCase();mm=build_(s,X).sum;X.only=''}const o=br[bb]=br[bb]||{b:bb,work:0,present:0,staff:0};o.work+=mm.work;o.present+=mm.present;o.staff++});
   late.push({name:s.Name,n:m.late});abs.push({name:s.Name,n:m.absent});});
  const days=[];for(let d=1;d<=X.last;d++){const k=X.y+'-'+String(X.m).padStart(2,'0')+'-'+String(d).padStart(2,'0');if(k<=X.today)days.push({d,n:daily[k]||0});}
  const top=a=>a.filter(x=>x.n>0).sort((x,y)=>y.n-x.n).slice(0,5);
- return{org:X.c.OrgName,addr:X.c.Address,today:X.today,staff:list.length,T,tot,days,br:Object.keys(br).map(k=>br[k]),late:top(late),abs:top(abs),rows};}
+ return{org:X.c.OrgName,addr:X.c.Address,today:day,todayReal:X.today,staff:list.length,T,tot,days,br:Object.keys(br).map(k=>br[k]),late:top(late),abs:top(abs),rows};}
 const active_=s=>String(s.Status||'Active').toLowerCase()!=='inactive',auth_=()=>{},ctx_=()=>ctxL(),rows_=n=>rowsOf(n),staff_=c=>rowsOf('Staff').find(s=>nc_(s.Code)===nc_(c));
 function rowsOf(n){const t=DATA.tabs[n];return t.rows.map(o=>{const x={};t.head.forEach((h,i)=>x[h]=o.v[i]);return x}).filter(x=>String(x[t.head[0]]).trim()!=='')}
 function ctxM(y,m,att){const c={};rowsOf('Settings').forEach(r=>c[r.Key]=r.Value);
@@ -164,16 +166,21 @@ function login(){PW=$('pw').value;const n=new Date();$('mon').value=n.getFullYea
  load(()=>{$('login').style.display='none';$('app').style.display='block';const s=rowsOf('Settings').find(x=>x.Key=='OrgName');$('org').textContent=s?s.Value:'';
  $('br').innerHTML='<option value="">সকল শাখা</option>'+D.branches.map(b=>`<option>${esc(b)}</option>`).join('');
  $('nav').innerHTML=NAV.map(x=>x?`<a id="n_${x[0]}" onclick="go('${x[0]}')">${x[1]} ${x[2]}</a>`:'<hr>').join('');go('dash')})}
-function go(v){cur=v;if($('ori'))$('ori').value=v==='rep'?'portrait':'landscape';document.querySelectorAll('nav a').forEach(a=>a.classList.toggle('on',a.id==='n_'+v));const x=NAV.find(n=>n&&n[0]===v);$('ttl').textContent=x[2];$('v').innerHTML='<div class="card">লোড হচ্ছে...</div>';
+function go(v){cur=v;if(v!=='today')DD=null;if($('ori'))$('ori').value=v==='rep'?'portrait':'landscape';document.querySelectorAll('nav a').forEach(a=>a.classList.toggle('on',a.id==='n_'+v));const x=NAV.find(n=>n&&n[0]===v);$('ttl').textContent=x[2];$('v').innerHTML='<div class="card">লোড হচ্ছে...</div>';
  ({dash,today:()=>dash(1),rep,sum,man,lbal,lapp,yrs,trf,face:faceView})[v]?({dash,today:()=>dash(1),rep,sum,man,lbal,lapp,yrs,trf,face:faceView})[v]():edit(v)}
 function opts(){const b=$('br').value;return D.staff.filter(s=>!b||s.branch===b).map(s=>`<option value="${esc(s.code)}">${esc(s.name)} (${esc(s.code)})${s.left?' — ছেড়েছেন':''}</option>`).join('')}
 const K=(c,a,v,s)=>`<div class="card k ${c}"><small>${a}</small><b>${v}</b><em>${s}</em></div>`;
 function donut(P){const t=P.reduce((a,b)=>a+b[1],0);let c=0;const g=t?P.map(([n,v,col])=>{const s=c/t*100;c+=v;return`${col} ${s}% ${c/t*100}%`}).join(','):'#e5e7eb 0 100%';
  return`<div class="dn" style="background:conic-gradient(${g})"><i>${t?bn(Math.round(P[0][1]/t*100))+'%':'-'}</i></div><div class="lg2">${P.map(p=>`<div><s style="background:${p[2]}"></s>${p[0]}: <b>${bn(p[1])}</b></div>`).join('')}</div>`}
-function dash(onlyToday){call('adminDashboard',[$('mon').value],r=>{const t=r.tot,rate=t.work?Math.round(t.present/t.work*100):0,mx=Math.max(1,...r.days.map(d=>d.n));
- const tbl=rows=>`<table><thead><tr><th>নাম</th><th>শাখা</th><th>ইন</th><th>আউট</th><th>অবস্থা</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${esc(x.name)}</td><td>${esc(x.branch)}</td><td>${T(x.in)}</td><td>${T(x.out)}</td><td class="st ${x.cls}">${x.cls=='a'?'এখনো IN নেই':x.st}</td></tr>`).join('')||'<tr><td colspan=5>তথ্য নেই</td></tr>'}</tbody></table>`;
- const cards=K('','মোট কর্মী',bn(r.staff),'শাখা: '+bn(D.branches.length))+K('t','আজ উপস্থিত',bn(r.T.present),'আজ ছুটিতে/অফ: '+bn(r.T.leave+r.T.off))+K('o','আজ দেরিতে',bn(r.T.late),'গ্রেস টাইমের পরে')+K('r','আজ IN নেই',bn(r.T.absent),'মাসে মোট অনুপস্থিত: '+bn(t.absent));
- if(onlyToday){$('v').innerHTML=`<div class="row c4">${cards}</div><div class="card"><h3>আজকের হাজিরা — ${bn(r.today.split('-').reverse().join('-'))}</h3>${tbl(r.rows)}</div>`;return}
+let DD=null;
+const addD=(ds,n)=>{const d=new Date(ds+'T00:00:00');d.setDate(d.getDate()+n);return fmtD(d)};
+function dailyGo(ds){if(!/^\d{4}-\d{2}-\d{2}$/.test(ds||''))return;DD=ds;$('mon').value=ds.slice(0,7);go('today')}
+function dash(onlyToday){const mon=$('mon').value,tdy=nowD(),date=onlyToday?((DD&&DD.slice(0,7)===mon)?DD:(tdy.slice(0,7)===mon?tdy:mon+'-01')):null;
+ call('adminDashboard',onlyToday?[mon,date]:[mon],r=>{const t=r.tot,rate=t.work?Math.round(t.present/t.work*100):0,mx=Math.max(1,...r.days.map(d=>d.n)),isT=onlyToday&&date===r.todayReal,pre=isT?'আজ ':'';
+ const tbl=rows=>`<table><thead><tr><th>নাম</th><th>শাখা</th><th>ইন</th><th>আউট</th><th>অবস্থা</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${esc(x.name)}</td><td>${esc(x.branch)}</td><td>${T(x.in)}</td><td>${T(x.out)}</td><td class="st ${x.cls}">${x.cls=='a'&&isT?'এখনো IN নেই':x.st}</td></tr>`).join('')||'<tr><td colspan=5>তথ্য নেই</td></tr>'}</tbody></table>`;
+ const cards=K('','মোট কর্মী',bn(r.staff),'শাখা: '+bn(D.branches.length))+K('t',pre+'উপস্থিত',bn(r.T.present),pre+'ছুটিতে/অফ: '+bn(r.T.leave+r.T.off))+K('o',pre+'দেরিতে',bn(r.T.late),'গ্রেস টাইমের পরে')+K('r',isT?'আজ IN নেই':'অনুপস্থিত',bn(r.T.absent),'মাসে মোট অনুপস্থিত: '+bn(t.absent));
+ if(onlyToday){const dm=bn(date.split('-').reverse().join('-')),title=isT?'আজকের হাজিরা — '+dm:'হাজিরা — '+dm+' ('+WD[DAYS[new Date(date+'T00:00:00').getDay()]]+')';
+  $('v').innerHTML=`<div class="row c4">${cards}</div><div class="card"><h3>${title}</h3><div class="fm noprint" style="margin-bottom:12px"><div><label>তারিখ বদলান</label><input type="date" id="ddt" value="${date}" onchange="dailyGo(this.value)"></div><button class="b" onclick="dailyGo('${addD(date,-1)}')">◀ আগের দিন</button><button class="b" onclick="dailyGo('${addD(date,1)}')">পরের দিন ▶</button>${isT?'':'<button onclick="dailyGo(nowD())">আজকের হাজিরায় ফিরুন</button>'}</div>${date>r.todayReal?'<div class="hint">ভবিষ্যতের তারিখ, এখনো হাজিরা শুরু হয়নি।</div>':''}${tbl(r.rows)}</div>`;return}
  const mini=(a,col)=>a.length?a.map(x=>`<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #eef2f7"><span>${esc(x.name)}</span><b style="color:${col}">${bn(x.n)} দিন</b></div>`).join(''):'<em style="color:#64748b">কেউ নেই 👍</em>';
  $('v').innerHTML=`<div class="row c4">${cards}</div>
  <div class="row c2">${K('t','এই মাসের উপস্থিতির হার ('+ml()+')',bn(rate)+'%','উপস্থিতি: '+bn(t.present)+' / কার্যদিবস-কর্মী: '+bn(t.work)+'<div class="pb"><i style="width:${rate}%"></i></div>'.replace('${rate}',rate))}${K('o','মাসের ওভারটাইম (অফ-ডে সহ)',hm(t.otMin),'অনুমোদিত ছুটি: '+bn(t.leave)+' দিন · দেরি: '+bn(t.late)+' বার')}</div>
