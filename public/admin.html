@@ -51,7 +51,7 @@ table{font-size:10px}th{padding:3px 2px}td{padding:1.5px 3px}.sig{margin-top:24p
 .pm .hd2{padding-bottom:5px}.pm .hd2 img{height:46px}.pm .hd2 h1{font-size:20px}.pm .hd2 p{font-size:10.5px}.pm .inf{font-size:11px;margin:5px 0}.pm .inf th,.pm .inf td{padding:3px 6px}.pm .kp{margin:4px 0 6px}.pm .kp td{padding:4px 2px}.pm .kp small{font-size:9.5px}.pm .kp b{font-size:15px}.pm .rt{font-size:10.5px}.pm .rt td{padding:2.5px 3px}.pm .sig{margin-top:64px}
 @media print{.hd2{padding-bottom:5px}.hd2 img{height:46px}.hd2 h1{font-size:20px}.hd2 p{font-size:10.5px}.inf{font-size:11px;margin:5px 0}.inf th,.inf td{padding:3px 6px}.kp{margin:4px 0 6px}.kp td{padding:4px 2px}.kp small{font-size:9.5px}.kp b{font-size:15px}.rt{font-size:10.5px}.rt td{padding:2.5px 3px}.sig{margin-top:64px}}</style></head><body>
 <div id="login"><img id="lgl" style="height:76px"><h3>অ্যাডমিন প্যানেল</h3><input id="pw" type="password" placeholder="পাসওয়ার্ড" style="width:100%;margin:8px 0" onkeydown="if(event.key=='Enter')login()"><button style="width:100%" onclick="login()">প্রবেশ করুন</button></div>
-<div id="app"><aside><div class="lg"><img id="lgi" style="height:52px"><img id="lgw" style="width:160px;display:block;margin:6px auto 2px"><b id="org" style="display:none"></b><small>অ্যাডমিন প্যানেল</small></div><nav id="nav"></nav></aside>
+<div id="app"><aside><div class="lg"><img id="lgi" style="height:52px"><img id="lgw" style="width:160px;display:block;margin:6px auto 2px"><b id="org" style="display:none"></b><small>অ্যাডমিন প্যানেল</small></div><nav id="nav"></nav><nav><a onclick="logout()">🚪 প্রস্থান (লগ আউট)</a></nav></aside>
 <section class="mn"><header class="tp"><h1 id="ttl"></h1><div><input type="month" id="mon" onchange="go(cur)"> <select id="br" onchange="go(cur)"></select> <button class="b" onclick="DATA=null;go(cur)">⟳ রিফ্রেশ</button> <select id="ori" title="প্রিন্টের দিক"><option value="portrait">⬜ Portrait</option><option value="landscape">▭ Landscape</option></select> <button onclick="window.print()">🖨 Print / PDF</button></div></header><div id="v"></div></section></div><div id="msg"></div>
 <script>const $=i=>document.getElementById(i);let PW='',D,cur='dash';
 /*LOCAL*/let DATA;const nc_=c=>String(c==null?'':c).trim().replace(/^0+(?=\d)/,'');
@@ -158,14 +158,15 @@ const bn=n=>String(n).replace(/\d/g,d=>BN[d]),esc=s=>String(s==null?'':s).replac
 function toast(t,e){const m=$('msg');m.textContent=t;m.className=e?'e':'';m.style.display='block';setTimeout(()=>m.style.display='none',e?5000:1800)}
 function call(f,a,cb){const L={adminDashboard,adminReport,adminSummary,adminSheet};if(L[f]){ensure(()=>cb(L[f](PW,...a)));return}
  google.script.run.withFailureHandler(e=>toast(e.message||e,1)).withSuccessHandler(cb)[f](PW,...a)}
-function load(cb){google.script.run.withFailureHandler(e=>toast(e.message||e,1)).withSuccessHandler(r=>{DATA=r;D.staff=rowsOf('Staff').filter(s=>active_(s)||edC(s.LastDay)).map(s=>({code:String(s.Code),name:s.Name,branch:bAt(s,trMap(),DATA.today),left:!!edC(s.LastDay)&&edC(s.LastDay)<DATA.today}));D.branches=rowsOf('Branches').map(b=>b.Branch);try{badge()}catch(e){}cb&&cb()}).adminData(PW,$('mon').value)}
+function load(cb,eb){google.script.run.withFailureHandler(e=>{toast(e.message||e,1);eb&&eb(e)}).withSuccessHandler(r=>{DATA=r;D.staff=rowsOf('Staff').filter(s=>active_(s)||edC(s.LastDay)).map(s=>({code:String(s.Code),name:s.Name,branch:bAt(s,trMap(),DATA.today),left:!!edC(s.LastDay)&&edC(s.LastDay)<DATA.today}));D.branches=rowsOf('Branches').map(b=>b.Branch);try{badge()}catch(e){}cb&&cb()}).adminData(PW,$('mon').value)}
 function ensure(fn){if(DATA&&DATA.month===$('mon').value)fn();else load(fn)}
 function T(t){if(!t)return'-';let[h,m]=t.split(':').map(Number),a=h>=12?'PM':'AM';h=h%12||12;return bn(h)+':'+bn(String(m).padStart(2,'0'))+' '+a}
 function ml(){const[y,m]=$('mon').value.split('-');return MN[m-1]+' '+bn(y)}
-function login(){PW=$('pw').value;const n=new Date();$('mon').value=n.getFullYear()+'-'+String(n.getMonth()+1).padStart(2,'0');D={staff:[],branches:[]};
- load(()=>{$('login').style.display='none';$('app').style.display='block';const s=rowsOf('Settings').find(x=>x.Key=='OrgName');$('org').textContent=s?s.Value:'';
+function login(auto){let sp='';try{sp=sessionStorage.getItem('adm_pw')||''}catch(e){}if(auto===true&&!sp)return;PW=auto===true?sp:$('pw').value;if(auto===true)$('login').style.display='none';const n=new Date();$('mon').value=n.getFullYear()+'-'+String(n.getMonth()+1).padStart(2,'0');D={staff:[],branches:[]};
+ load(()=>{try{sessionStorage.setItem('adm_pw',PW)}catch(e){}$('login').style.display='none';$('app').style.display='block';const s=rowsOf('Settings').find(x=>x.Key=='OrgName');$('org').textContent=s?s.Value:'';
  $('br').innerHTML='<option value="">সকল শাখা</option>'+D.branches.map(b=>`<option>${esc(b)}</option>`).join('');
- $('nav').innerHTML=NAV.map(x=>x?`<a id="n_${x[0]}" onclick="go('${x[0]}')">${x[1]} ${x[2]}</a>`:'<hr>').join('');go('dash')})}
+ $('nav').innerHTML=NAV.map(x=>x?`<a id="n_${x[0]}" onclick="go('${x[0]}')">${x[1]} ${x[2]}</a>`:'<hr>').join('');go('dash')},e=>{$('login').style.display='';if(String((e&&e.message)||e).indexOf('পাসওয়ার্ড ভুল')>=0){try{sessionStorage.removeItem('adm_pw')}catch(x){}}})}
+function logout(){try{sessionStorage.removeItem('adm_pw')}catch(e){}PW='';DATA=null;location.reload()}
 function go(v){cur=v;if(v!=='today')DD=null;if($('ori'))$('ori').value=v==='rep'?'portrait':'landscape';document.querySelectorAll('nav a').forEach(a=>a.classList.toggle('on',a.id==='n_'+v));const x=NAV.find(n=>n&&n[0]===v);$('ttl').textContent=x[2];$('v').innerHTML='<div class="card">লোড হচ্ছে...</div>';
  ({dash,today:()=>dash(1),rep,sum,man,lbal,lapp,yrs,trf,face:faceView})[v]?({dash,today:()=>dash(1),rep,sum,man,lbal,lapp,yrs,trf,face:faceView})[v]():edit(v)}
 function opts(){const b=$('br').value;return D.staff.filter(s=>!b||s.branch===b).map(s=>`<option value="${esc(s.code)}">${esc(s.name)} (${esc(s.code)})${s.left?' — ছেড়েছেন':''}</option>`).join('')}
@@ -291,4 +292,5 @@ window.addEventListener('beforeprint',fitPrint);window.addEventListener('afterpr
 function foldHints(){document.querySelectorAll('#v .hint:not([data-f]):not([id])').forEach(h=>{h.dataset.f='1';const t=h.textContent.replace(/\s+/g,' ').trim();if(t.length<90)return;
  h.innerHTML='<details'+(t.indexOf('⚠')>=0?' open':'')+'><summary>ℹ️ নির্দেশনা <span class="hp">— '+esc(t.slice(0,46))+'…</span></summary><div class="hb">'+h.innerHTML+'</div></details>'})}
 new MutationObserver(foldHints).observe($('v'),{childList:true,subtree:true});foldHints();
+window.addEventListener('load',()=>login(true));
 </script></body></html>
