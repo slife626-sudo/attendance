@@ -24,6 +24,9 @@ async function leaveTypes(){const m={};let main='';(await q('select * from leave
 const brList=b=>S(b).split(/[,،]/).map(x=>x.trim().toLowerCase()).filter(Boolean);
 function holMap(rows,branch){const m={};rows.forEach(h=>{const from=S(h.d).trim(),to=S(h.d_to).trim()||from;if(!okD(from)||!okD(to)||to<from)return;const L=brList(h.branch);rng(from,to).forEach(d=>{const bl=S(typeof branch==='function'?branch(d):branch).trim().toLowerCase();if(L.length&&L.indexOf(bl)<0)return;if(!m[d])m[d]=S(h.name)||'ছুটি'})});return m}
 async function loadTr(){try{return await q('select * from transfers')}catch(e){return[]}}
+const tmin=t=>{const m=/^(\d{1,2}):(\d{2})/.exec(S(t));return m?+m[1]*60+ +m[2]:null},hhmm=t=>/^\d{2}:\d{2}$/.test(S(t));
+async function brOf(d,code){try{return await q('select * from breaks where d=$1 and code=$2 order by start_t,id',[d,code])}catch(e){return[]}}
+const brSum=l=>{let m=0,n=0,open='';l.forEach(b=>{n++;const a=tmin(b.start_t),e=tmin(b.end_t);if(S(b.end_t)==='')open=S(b.start_t);else if(a!=null&&e!=null&&e>=a)m+=e-a});return{n,m,open}};
 function branchAt(s,TR,date){const L=TR.filter(t=>nc(t.code)===nc(s.code)).sort((a,b)=>S(a.eff).localeCompare(S(b.eff)));if(!L.length)return S(s.branch);if(date<S(L[0].eff))return S(L[0].from_branch);let b=S(L[0].to_branch);for(const t of L)if(S(t.eff)<=date)b=S(t.to_branch);return b}
 const probEnd=(jn,m)=>{const tot=Number(jn.slice(0,4))*12+(Number(jn.slice(5,7))-1)+m;return Math.floor(tot/12)+'-'+String(tot%12+1).padStart(2,'0')+'-01'};
 const numOr=v=>{const x=S(v).trim();if(x===''||isNaN(Number(x)))return null;return Math.max(0,Math.floor(Number(x)))};
@@ -53,7 +56,7 @@ async function leaveAdd(s,type,from,to,reason,status,by){from=S(from).trim();to=
 const F={
 async staffInfo(code){const s=await findStaff(code);if(!s)return{ok:false,message:'স্টাফ পাওয়া যায়নি'};if(!active(s))return{ok:false,message:'এই স্টাফ সক্রিয় নয়'};{const td=now((await cfg()).Timezone).date;if(!empOn(s,td))return{ok:false,message:empMsg(s,td)}}
  const c=await cfg(),a=(await q('select in_t,out_t from attendance where d=$1 and code=$2',[now(c.Timezone).date,s.code]))[0]||{},w=await shiftOf(s);
- return{ok:true,face:!!s.face,name:s.name,designation:s.designation,branch:branchAt(s,await loadTr(),now(c.Timezone).date),shift:w.start+' - '+w.end,in:a.in_t||'',out:a.out_t||''}},
+ const bs0=brSum(await brOf(now(c.Timezone).date,s.code));return{ok:true,bs:bs0.open,bn:bs0.n,bm:bs0.m,face:!!s.face,name:s.name,designation:s.designation,branch:branchAt(s,await loadTr(),now(c.Timezone).date),shift:w.start+' - '+w.end,in:a.in_t||'',out:a.out_t||''}},
 async punch(code,pin,type,lat,lng,acc,desc,blink){const s=await findStaff(code),c=await cfg();
  if(!s||S(s.pin).trim()!==S(pin).trim())return{ok:false,message:'PIN সঠিক নয়'};if(!active(s))return{ok:false,message:'স্টাফ সক্রিয় নয়'};{const td=now(c.Timezone).date;if(!empOn(s,td))return{ok:false,message:empMsg(s,td)}}
  let src='Mobile';
@@ -69,13 +72,22 @@ async punch(code,pin,type,lat,lng,acc,desc,blink){const s=await findStaff(code),
  const tb=branchAt(s,await loadTr(),now(c.Timezone).date),b=(await q('select * from branches where branch=$1',[tb]))[0];if(!b||!Number(b.lat)||!Number(b.lng))return{ok:false,message:'এই শাখার লোকেশন সেট করা নেই'};
  const d=Math.round(dist(lat,lng,Number(b.lat),Number(b.lng)));if(d>(Number(b.radius)||150))return{ok:false,message:'আপনি শাখা থেকে '+d+' মিটার দূরে আছেন'};
  const n=now(c.Timezone),a=(await q('select * from attendance where d=$1 and code=$2',[n.date,s.code]))[0];
+ if(type==='BS'||type==='BE'){if(!a||!a.in_t)return{ok:false,message:'আগে IN দিন'};if(a.out_t)return{ok:false,message:'আজ আপনি OUT দিয়েছেন ('+a.out_t+') — এখন ব্রেক নেওয়া যাবে না'};
+  let L;try{L=await q('select * from breaks where d=$1 and code=$2 order by id',[n.date,s.code])}catch(e){return{ok:false,message:'ডেটাবেস আপডেট বাকি — অ্যাডমিনকে breaks.sql চালাতে বলুন'}}
+  const op=L.find(b=>S(b.end_t)==='');
+  if(type==='BS'){if(op)return{ok:false,message:'আপনার ব্রেক চলছে ('+op.start_t+' থেকে)'};
+   await q("insert into breaks(d,code,start_t,end_t,source,upd) values($1,$2,$3,'',$4,$5)",[n.date,s.code,n.time,src,n.ts]);return{ok:true,message:'ব্রেক শুরু হয়েছে: '+n.time}}
+  if(!op)return{ok:false,message:'এখন কোনো ব্রেক চলছে না'};
+  const one=Math.max(0,tmin(n.time)-tmin(op.start_t)),tot=brSum(L.filter(b=>b.id!==op.id)).m+one;
+  await q('update breaks set end_t=$2,upd=$3 where id=$1',[op.id,n.time,n.ts]);return{ok:true,message:'ব্রেক শেষ: '+n.time+' (এবার '+one+' মিনিট, আজ মোট '+tot+' মিনিট)'}}
  if(type==='IN'){if(a&&a.in_t)return{ok:false,message:'আজ আপনি '+a.in_t+'-এ IN দিয়েছেন'};
   await q(`insert into attendance(d,code,name,branch,in_t,in_dist,source,upd) values($1,$2,$3,$4,$5,$6,$8,$7) on conflict(d,code) do update set in_t=$5,in_dist=$6,upd=$7`,[n.date,s.code,s.name,tb,n.time,String(d),n.ts,src]);}
- else{if(!a||!a.in_t)return{ok:false,message:'আগে IN দিন'};await q('update attendance set out_t=$3,out_dist=$4,upd=$5 where d=$1 and code=$2',[n.date,s.code,n.time,String(d),n.ts]);}
+ else{if(!a||!a.in_t)return{ok:false,message:'আগে IN দিন'};{const op=(await brOf(n.date,s.code)).find(b=>S(b.end_t)==='');if(op)return{ok:false,message:'আপনার ব্রেক চলছে ('+op.start_t+' থেকে) — আগে "ব্রেক শেষ" দিন, তারপর OUT'}}await q('update attendance set out_t=$3,out_dist=$4,upd=$5 where d=$1 and code=$2',[n.date,s.code,n.time,String(d),n.ts]);}
  return{ok:true,message:type+' সফল হয়েছে: '+n.time}},
 async adminData(p,month){auth(p);const c=await cfg(),o={month,today:now(c.Timezone).date,tabs:{},att:[],faces:(await q("select code from staff where face is not null and face<>''")).map(x=>x.code)};
  for(const n of Object.keys(T)){try{o.tabs[n]=await sheet(n)}catch(e){if(n==='Transfers')o.tabs[n]={head:HEAD[n],rows:[]};else if(n==='LeaveTypes'){const c4=T.LeaveTypes.c.slice(0,4);o.tabs[n]={head:HEAD[n],rows:(await q(`select id,${c4.join(',')} from leave_types order by id`)).map(x=>({i:x.id,v:[...c4.map(c=>S(x[c])),'']}))}}else if(n==='Staff'){let cs=T.Staff.c.slice(0,10),r;try{r=await q(`select id,${cs.join(',')} from staff order by id`)}catch(e2){cs=T.Staff.c.slice(0,8);r=await q(`select id,${cs.join(',')} from staff order by id`)}o.tabs[n]={head:HEAD[n],rows:r.map(x=>({i:x.id,v:[...cs.map(c=>S(x[c])),...Array(T.Staff.c.length-cs.length).fill('')]}))}}else throw new Error('ডেটাবেস আপডেট বাকি — leave.sql চালান ('+n+')')}}
- (await q('select d,code,in_t,out_t,note from attendance where d like $1',[month+'%'])).forEach(r=>o.att.push({d:r.d,c:r.code,in:r.in_t||'',out:r.out_t||'',note:r.note||''}));return o},
+ (await q('select d,code,in_t,out_t,note from attendance where d like $1',[month+'%'])).forEach(r=>o.att.push({d:r.d,c:r.code,in:r.in_t||'',out:r.out_t||'',note:r.note||''}));
+ o.brk=[];try{(await q('select id,d,code,start_t,end_t,source from breaks where d like $1',[month+'%'])).forEach(r=>o.brk.push({i:r.id,d:r.d,c:r.code,s:S(r.start_t),e:S(r.end_t),src:S(r.source)}))}catch(e){}return o},
 async adminSetRow(p,n,row,arr){auth(p);const m=T[n];if(!m)throw new Error('অনুমোদিত নয়');const v=m.c.map((_,i)=>S(arr[i]).trim());
  if(row>0)await q(`update ${m.t} set ${m.c.map((c,i)=>c+'=$'+(i+1)).join(',')} where id=$${m.c.length+1}`,[...v,row]);
  else await q(`insert into ${m.t}(${m.c.join(',')}) values(${m.c.map((_,i)=>'$'+(i+1)).join(',')})`,v);return{ok:true}},
@@ -83,7 +95,7 @@ async adminSaveFace(p,code,json){auth(p);const s=await findStaff(code);if(!s)thr
  a=Array.isArray(a)?toArr(a):[];if(!a.length||a.length>12||!a.every(ok128))throw new Error('মুখের তথ্য সঠিক নয়');await q('update staff set face=$1 where id=$2',[JSON.stringify(a),s.id]);return{ok:true}},
 async adminDelFace(p,code){auth(p);const s=await findStaff(code);if(!s)throw new Error('স্টাফ পাওয়া যায়নি');await q("update staff set face='' where id=$1",[s.id]);return{ok:true}},
 async adminDelRow(p,n,row){auth(p);if(!T[n]||n==='Settings')throw new Error('অনুমোদিত নয়');await q(`delete from ${T[n].t} where id=$1`,[row]);return{ok:true}},
-async adminDelPunch(p,code,date){auth(p);if(!/^\d{4}-\d{2}-\d{2}$/.test(date))throw new Error('তারিখ দিন');const s=await findStaff(code);if(!s)throw new Error('স্টাফ পাওয়া যায়নি');await q('delete from attendance where d=$1 and code=$2',[date,s.code]);return{ok:true}},
+async adminDelPunch(p,code,date){auth(p);if(!/^\d{4}-\d{2}-\d{2}$/.test(date))throw new Error('তারিখ দিন');const s=await findStaff(code);if(!s)throw new Error('স্টাফ পাওয়া যায়নি');await q('delete from attendance where d=$1 and code=$2',[date,s.code]);try{await q('delete from breaks where d=$1 and code=$2',[date,s.code])}catch(e){}return{ok:true}},
 async deviceSync(key,rows){const k=process.env.DEVICE_KEY||process.env.ADMIN_PASS;if(!k||S(key)!==k)throw new Error('কী ভুল');
  if(!Array.isArray(rows)||rows.length>500)throw new Error('ডাটা সঠিক নয়');
  const c=await cfg(),gap=Number(c.DeviceMinGap)||10,staff=await q('select * from staff'),TR=await loadTr(),by={},unknown=new Set();
@@ -91,12 +103,17 @@ async deviceSync(key,rows){const k=process.env.DEVICE_KEY||process.env.ADMIN_PAS
   if(!s||!active(s)||!empOn(s,m[1])){unknown.add(S(r.code));continue}const k2=m[1]+'|'+nc(s.code);(by[k2]=by[k2]||{d:m[1],s,t:[]}).t.push(m[2]+':'+m[3])}
  const ds=Object.values(by).map(x=>x.d).sort(),ex={};
  if(ds.length)(await q('select * from attendance where d>=$1 and d<=$2',[ds[0],ds[ds.length-1]])).forEach(a=>ex[a.d+'|'+nc(a.code)]=a);
- const mins=t=>+t.slice(0,2)*60+ +t.slice(3,5);let saved=0,manual=0;
+ const mins=t=>+t.slice(0,2)*60+ +t.slice(3,5);let saved=0,manual=0,nbrk=0,exB={};
+ if(ds.length)try{(await q("select * from breaks where d>=$1 and d<=$2 and source='Device'",[ds[0],ds[ds.length-1]])).forEach(b=>{const k3=b.d+'|'+nc(b.code);(exB[k3]=exB[k3]||[]).push(S(b.start_t),S(b.end_t))})}catch(e){exB=null}
  for(const k2 in by){const{d,s,t}=by[k2],a=ex[k2];if(a&&a.source==='Manual'){manual++;continue}
   const all=[...t,a&&a.in_t,a&&a.out_t].filter(Boolean).sort(),tin=all[0],last=all[all.length-1],tout=mins(last)-mins(tin)>=gap?last:(a&&a.out_t)||'',
   src=a?(S(a.source).includes('Device')?a.source:(S(a.source)||'Mobile')+'+Device'):'Device';
-  await q(`insert into attendance(d,code,name,branch,in_t,out_t,source,upd) values($1,$2,$3,$4,$5,$6,$7,$8) on conflict(d,code) do update set in_t=$5,out_t=$6,source=$7,upd=$8`,[d,s.code,s.name,branchAt(s,TR,d),tin,tout,src,new Date().toISOString()]);saved++}
- return{ok:true,saved,manual,unknown:[...unknown]}},
+  await q(`insert into attendance(d,code,name,branch,in_t,out_t,source,upd) values($1,$2,$3,$4,$5,$6,$7,$8) on conflict(d,code) do update set in_t=$5,out_t=$6,source=$7,upd=$8`,[d,s.code,s.name,branchAt(s,TR,d),tin,tout,src,new Date().toISOString()]);saved++;
+  if(exB){const bg=Number(c.BreakMinGap)||3,sc=[...new Set([...all,...(exB[k2]||[])].filter(x=>/^\d{2}:\d{2}$/.test(S(x))))].sort(),mid=[];
+   if(tout)sc.forEach(x=>{if(mins(x)-mins(tin)>=bg&&mins(tout)-mins(x)>=bg&&(!mid.length||mins(x)-mins(mid[mid.length-1])>=bg))mid.push(x)});
+   try{await q("delete from breaks where d=$1 and code=$2 and source='Device'",[d,s.code]);
+    for(let i=0;i<mid.length;i+=2){await q("insert into breaks(d,code,start_t,end_t,source,upd) values($1,$2,$3,$4,'Device',$5)",[d,s.code,mid[i],mid[i+1]||'',new Date().toISOString()]);nbrk++}}catch(e){}}}
+ return{ok:true,saved,manual,breaks:nbrk,unknown:[...unknown]}},
 async leaveApply(code,pin,type,from,to,reason){const a=await staffAuth(code,pin);if(a.err)return{ok:false,message:a.err};const r=await leaveAdd(a.s,type,from,to,reason,'Pending','staff');return r.ok?{ok:true,message:'আবেদন জমা হয়েছে — অনুমোদনের অপেক্ষায়'+(r.unpaid?'। এর মধ্যে '+r.unpaid+' দিন কোটার বাইরে বা শিক্ষানবিস কালে পড়ায় বিনা বেতনে গণ্য হবে':'')}:r},
 async leaveMine(code,pin){const a=await staffAuth(code,pin);if(a.err)return{ok:false,message:a.err};const s=a.s,c=await cfg(),year=Number(now(c.Timezone).date.slice(0,4)),lt=await leaveTypes(),all=await q('select * from leaves'),TR=await loadTr(),hols=holMap(await q('select * from holidays'),d=>branchAt(s,TR,d));
  const emp=empOf2(s),offs=S(s.weekly_off||c.WeeklyOff||'Fri').split(/[ ,]+/),calc=leaveCalc(s.code,all,lt,hols,offs,year,emp),calcP=leaveCalc(s.code,all,lt,hols,offs,year,emp,true);
@@ -121,6 +138,20 @@ async adminTransferDel(p,id){auth(p);const TR=await q('select * from transfers')
 async adminSavePunch(p,code,date,tin,tout,note){auth(p);{const s0=await findStaff(code);if(s0&&/^\d{4}-\d{2}-\d{2}$/.test(S(date))&&!empOn(s0,S(date)))throw new Error('এই তারিখে কর্মী কর্মরত নন (যোগদান বা শেষ কর্মদিবস দেখুন)')}const s=await findStaff(code);if(!s)throw new Error('স্টাফ পাওয়া যায়নি');if(!/^\d{4}-\d{2}-\d{2}$/.test(date))throw new Error('তারিখ দিন');
  tin=S(tin).trim();tout=S(tout).trim();if(!tin&&!tout)throw new Error('IN বা OUT এর অন্তত একটি সময় দিন');if((tin&&!/^\d{2}:\d{2}$/.test(tin))||(tout&&!/^\d{2}:\d{2}$/.test(tout)))throw new Error('সময় HH:MM ফরম্যাটে দিন');
  await q(`insert into attendance(d,code,name,branch,in_t,out_t,source,note,upd) values($1,$2,$3,$4,$5,$6,'Manual',$7,$8) on conflict(d,code) do update set in_t=coalesce(nullif($5,''),attendance.in_t),out_t=coalesce(nullif($6,''),attendance.out_t),source='Manual',note=coalesce(nullif($7,''),attendance.note),upd=$8`,[date,s.code,s.name,branchAt(s,await loadTr(),date),tin,tout,note||'',new Date().toISOString()]);return{ok:true}},
-async adminGetPunch(p,code,date){auth(p);const s=await findStaff(code);if(!s||!/^\d{4}-\d{2}-\d{2}$/.test(S(date)))return{found:false};const r=(await q('select * from attendance where d=$1 and code=$2',[date,s.code]))[0];return r?{found:true,in:S(r.in_t),out:S(r.out_t),note:S(r.note),source:S(r.source)}:{found:false}}};
+async adminGetPunch(p,code,date){auth(p);const s=await findStaff(code);if(!s||!/^\d{4}-\d{2}-\d{2}$/.test(S(date)))return{found:false};const r=(await q('select * from attendance where d=$1 and code=$2',[date,s.code]))[0];return r?{found:true,in:S(r.in_t),out:S(r.out_t),note:S(r.note),source:S(r.source)}:{found:false}},
+async adminBreaks(p,from,to){auth(p);from=S(from);to=S(to);if(!okD(from)||!okD(to)||to<from)throw new Error('তারিখের পরিসীমা সঠিক নয়');if(rng(from,to).length>=400)throw new Error('সর্বোচ্চ ১ বছরের পরিসীমা বেছে নিন');
+ let r;try{r=await q('select id,d,code,start_t,end_t,source from breaks where d>=$1 and d<=$2 order by d,start_t',[from,to])}catch(e){throw new Error('ডেটাবেস আপডেট বাকি — breaks.sql চালান')}
+ return r.map(x=>({i:x.id,d:x.d,c:x.code,s:S(x.start_t),e:S(x.end_t),src:S(x.source)}))},
+async adminGetBreaks(p,code,date){auth(p);const s=await findStaff(code);if(!s||!okD(S(date)))return{list:[]};let r;try{r=await q('select id,start_t,end_t,source from breaks where d=$1 and code=$2 order by start_t,id',[date,s.code])}catch(e){throw new Error('ডেটাবেস আপডেট বাকি — breaks.sql চালান')}
+ return{list:r.map(x=>({i:x.id,s:S(x.start_t),e:S(x.end_t),src:S(x.source)}))}},
+async adminSaveBreak(p,id,code,date,st,en){auth(p);const s=await findStaff(code);if(!s)throw new Error('স্টাফ পাওয়া যায়নি');date=S(date).trim();st=S(st).trim();en=S(en).trim();
+ if(!okD(date))throw new Error('তারিখ দিন');if(!empOn(s,date))throw new Error('এই তারিখে কর্মী কর্মরত নন');if(!hhmm(st))throw new Error('ব্রেক শুরুর সময় দিন');if(en&&!hhmm(en))throw new Error('সময় HH:MM ফরম্যাটে দিন');if(en&&tmin(en)<tmin(st))throw new Error('ব্রেক শেষের সময় শুরুর আগে হতে পারে না');
+ let L;try{L=await q('select * from breaks where d=$1 and code=$2',[date,s.code])}catch(e){throw new Error('ডেটাবেস আপডেট বাকি — breaks.sql চালান')}
+ id=Number(id)||0;L=L.filter(b=>b.id!==id);
+ if(!en&&L.some(b=>S(b.end_t)===''))throw new Error('এই দিনে আগে থেকেই একটি চলমান ব্রেক আছে — সেটার শেষ সময় দিন');
+ const a1=tmin(st),b1=en?tmin(en):a1;for(const b of L){const a2=tmin(b.start_t),b2=S(b.end_t)===''?a2:tmin(b.end_t);if((a1<b2&&a2<b1)||a1===a2)throw new Error('অন্য ব্রেকের সঙ্গে সময় মিলে যাচ্ছে ('+b.start_t+(S(b.end_t)?' - '+b.end_t:'')+')')}
+ if(id)await q("update breaks set start_t=$2,end_t=$3,source='Manual',upd=$4 where id=$1",[id,st,en,new Date().toISOString()]);
+ else await q("insert into breaks(d,code,start_t,end_t,source,upd) values($1,$2,$3,$4,'Manual',$5)",[date,s.code,st,en,new Date().toISOString()]);return{ok:true}},
+async adminDelBreak(p,id){auth(p);try{await q('delete from breaks where id=$1',[Number(id)||0])}catch(e){throw new Error('ডেটাবেস আপডেট বাকি — breaks.sql চালান')}return{ok:true}}};
 export default async function handler(req,res){try{if(req.method!=='POST')return res.status(405).json({error:'POST only'});
  const{fn,args=[]}=req.body||{};if(!F[fn])throw new Error('অজানা অনুরোধ');res.json({data:await F[fn](...args)})}catch(e){res.json({error:e.message})}}
